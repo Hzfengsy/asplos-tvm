@@ -457,7 +457,7 @@ def micro(model="unknown", options=None):
     opts = _merge_opts(
         MICRO_SUPPORTED_MODELS[model] + [f"-model={model}"],
         options,
-    )
+        )
 
     # NOTE: in the future, the default micro target will be LLVM except when
     # external dependencies are present.
@@ -704,6 +704,65 @@ def hexagon(cpu_ver="v66", **kwargs):
             return "-mattr=" + ",".join(tfs) if tfs else ""
 
         return target + mcpu + " " + create_target_features(config)
+
+    # Simulator options string
+    def create_sim_options(cpu_ver, config):
+        """Create simulator option string."""
+
+        def validate_hvx_length(codegen_hvx, sim_options):
+            if sim_options and "--hvx_length" in sim_options:
+                # If --hvx_length was specified, check HVX length of sim
+                # vs codegen
+                i = sim_options.index("hvx_length") + len("hvx_length") + 1
+                sim_hvx = sim_options[i : i + 3]
+                if sim_hvx != str(codegen_hvx):
+                    msg = "sim hvx {} and codegen hvx {} mismatch!".format(sim_hvx, codegen_hvx)
+                    # Set the stacklevel to the tvm.target.hexagon() call.
+                    warnings.warn(msg, stacklevel=4)
+            elif codegen_hvx != 0:
+                # If --hvx_length was not given, add it if HVX is enabled
+                sim_options = sim_options + " " if isinstance(sim_options, str) else ""
+                sim_options += "--hvx_length " + str(codegen_hvx)
+            return sim_options or ""
+
+        hvx = config["hvx"]
+        sim_options = config["sim_options"]
+        if not sim_options:
+            return cpu_ver + " " + validate_hvx_length(hvx, sim_options)
+
+        sim_cpu = cpu_ver + " "
+
+        # Add user defined args
+        if isinstance(sim_options, list):
+            sim_options = " ".join(sim_options)
+
+        # Check for supplied sim cpu version
+        if "v6" in sim_options:
+            sim_cpu = ""
+
+            # Regex match for allowed cpus
+            valid_cpu_str_regex = (
+                    r"(?P<pre>--.*\s)?(--m)?"
+                    + r"(?P<base_version>v6[25678])(?P<sub_version>[a-z])?"
+                    + r"(?P<l2_size>_[0-9]+)?(?P<rev>_rev[0-9])?\s?(?P<post>--.*)?"
+            )
+            m = re.match(valid_cpu_str_regex, sim_options.lower())
+            if not m:
+                raise ValueError('Invalid simulator argument string "{}"'.format(sim_options))
+
+            # Parse options into correct order
+            cpu_attr = {x: str(m.groupdict()[x] or "") for x in m.groupdict()}
+            sim_options = (
+                    cpu_attr["base_version"]
+                    + cpu_attr["sub_version"]
+                    + cpu_attr["l2_size"]
+                    + cpu_attr["rev"]
+                    + " "
+                    + cpu_attr["pre"]
+                    + cpu_attr["post"]
+            )
+
+        return sim_cpu + " " + validate_hvx_length(hvx, sim_options)
 
     # LLVM options string
     def create_llvm_options(cpu_ver, config):  # pylint: disable=unused-argument

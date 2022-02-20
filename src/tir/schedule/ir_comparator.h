@@ -104,6 +104,8 @@ class TensorizeComparator : public ExprComparator, public StmtComparator {
   bool is_scope_block = true;
   /*! \brief The arithmetic analyzer. */
   arith::Analyzer analyzer_;
+  /*! \brief The domain of the inner block iters. */
+  Map<Var, arith::IntSet> inner_iter_dom_map_;
   /*! \brief Additional error messages. Only used when assert_mode is true. */
   std::vector<std::string> error_messages_;
   // variable remap if any

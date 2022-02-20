@@ -36,6 +36,8 @@
 #include <mutex>
 #include <stack>
 
+#include "../printer/text_printer.h"
+
 namespace tvm {
 
 // Register build pipeline related options
@@ -165,6 +167,40 @@ TVM_REGISTER_GLOBAL("driver.get_binds")
       return out_arr;
     });
 
+transform::Pass BindTarget(Target target) {
+  auto fpass = [target](tir::PrimFunc f, IRModule m, transform::PassContext ctx) {
+    return WithAttr(std::move(f), tvm::attr::kTarget, target);
+  };
+  return tir::transform::CreatePrimFuncPass(fpass, 0, "BindTarget", {});
+}
+
+static transform::Pass AnnotateEntryFunc(bool b) {
+  auto fpass = [](tir::PrimFunc f, IRModule m, transform::PassContext ctx) {
+    return WithAttr(std::move(f), tir::attr::kIsEntryFunc, Bool(true));
+  };
+  return tir::transform::CreatePrimFuncPass(fpass, 0, "AnnotateEntryFunc", {});
+}
+
+template <typename FCond>
+transform::Pass Filter(FCond fcond) {
+  auto fpass = [fcond](tir::PrimFunc f, IRModule m, transform::PassContext ctx) {
+    if (fcond(f)) {
+      return f;
+    } else {
+      return tir::PrimFunc(nullptr);
+    }
+  };
+  return tir::transform::CreatePrimFuncPass(fpass, 0, "Filter", {});
+}
+
+Pass Print() {
+  auto pass_func = [](tir::PrimFunc f, IRModule m, transform::PassContext ctx) {
+    LOG(INFO) << tir::AsTVMScript(f);
+    return f;
+  };
+  return tir::transform::CreatePrimFuncPass(pass_func, 0, "tir.Print", {});
+}
+
 Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   transform::PassContext pass_ctx = transform::PassContext::Current();
 
@@ -224,14 +260,17 @@ Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   pass_list.push_back(tir::transform::LowerInitBlock());
   pass_list.push_back(tir::transform::PlanAndUpdateBufferAllocationLocation());
   pass_list.push_back(tir::transform::ConvertBlocksToOpaque());
-  pass_list.push_back(tir::transform::UnifyThreadBinding());
   pass_list.push_back(tir::transform::CompactBufferAllocation());
+  pass_list.push_back(tir::transform::Simplify());
+  pass_list.push_back(tir::transform::LowerAutoCopy());
+  pass_list.push_back(tir::transform::UnifyThreadBinding());
   pass_list.push_back(tir::transform::LowerMatchBuffer());
   pass_list.push_back(tir::transform::InjectSoftwarePipeline());
   pass_list.push_back(tir::transform::FlattenBuffer());
   pass_list.push_back(tir::transform::LowerVtcmAlloc());
   pass_list.push_back(tir::transform::BF16Legalize());
   pass_list.push_back(tir::transform::NarrowDataType(32));
+  pass_list.push_back(tir::transform::Simplify());
   pass_list.push_back(tir::transform::Simplify());
 
   // Add user-defined phase-1 passes
@@ -248,6 +287,7 @@ Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   if (!disable_storage_rewrite) {
     pass_list.push_back(tir::transform::StorageRewrite());
   }
+  pass_list.push_back(tir::transform::Simplify());
   pass_list.push_back(tir::transform::UnrollLoop());
 
   // Add user-defined phase-2 passes

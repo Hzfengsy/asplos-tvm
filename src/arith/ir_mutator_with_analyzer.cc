@@ -129,6 +129,13 @@ Stmt IRMutatorWithAnalyzer::VisitStmt_(const AssertStmtNode* op) {
   }
 }
 
+Stmt IRMutatorWithAnalyzer::VisitStmt_(const BlockNode* op) {
+  for (const IterVar& iter_var : op->iter_vars) {
+    analyzer_->Bind(iter_var->var, iter_var->dom);
+  }
+  return StmtExprMutator::VisitStmt_(op);
+}
+
 PrimExpr IRMutatorWithAnalyzer::VisitExpr_(const CallNode* op) {
   // add condition context to if_then_else
   static auto op_if_then_else = Op::Get("tir.if_then_else");

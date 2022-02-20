@@ -64,6 +64,9 @@ class ThreadExtentChecker : private StmtVisitor {
   }
 
   void VisitStmt_(const BlockNode* block) {
+    if (block->annotations.count(attr::meta_schedule_tensor_core_enabled)) {
+      thread_idx_x = 32;
+    }
     if (Optional<Integer> low_inclusive =
             GetAnn<Integer>(block, attr::meta_schedule_thread_extent_low_inclusive)) {
       if (Optional<Integer> high_inclusive =
@@ -148,14 +151,18 @@ class VerifyGPUCodeNode : public PostprocNode {
           pass_list.push_back(tir::transform::LowerInitBlock());
           pass_list.push_back(tir::transform::PlanAndUpdateBufferAllocationLocation());
           pass_list.push_back(tir::transform::ConvertBlocksToOpaque());
-          pass_list.push_back(tir::transform::UnifyThreadBinding());
           pass_list.push_back(tir::transform::CompactBufferAllocation());
+          pass_list.push_back(tir::transform::Simplify());
+          pass_list.push_back(tir::transform::LowerAutoCopy());
+          pass_list.push_back(tir::transform::UnifyThreadBinding());
           pass_list.push_back(tir::transform::LowerMatchBuffer());
           pass_list.push_back(tir::transform::InjectSoftwarePipeline());
           pass_list.push_back(tir::transform::FlattenBuffer());
           pass_list.push_back(tir::transform::BF16Legalize());
           pass_list.push_back(tir::transform::NarrowDataType(32));
           pass_list.push_back(tir::transform::Simplify());
+          pass_list.push_back(tir::transform::Simplify());
+          
           // Phase 2
           pass_list.push_back(tir::transform::VectorizeLoop(true));
           pass_list.push_back(tir::transform::InjectVirtualThread());

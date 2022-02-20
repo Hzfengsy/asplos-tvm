@@ -352,7 +352,7 @@ void RelaxBufferRegions(const Map<Var, PrimExpr>& binding,
     std::vector<NDIntSet>& relaxed_regions = it->second;
     // Check and update the cached `var_dom`
     runtime::StorageScope scope =
-        relax_storage_scope ? runtime::StorageScope::Create(buffer.scope()) : global_scope;
+        true ? runtime::StorageScope::Create(buffer.scope()) : global_scope;
     runtime::StorageRank rank = scope.rank;
     if (rank != previous_rank || !var_dom.defined()) {
       previous_rank = rank;

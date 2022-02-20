@@ -32,6 +32,7 @@
 
 #include "../../runtime/thread_storage_scope.h"
 #include "../transforms/ir_utils.h"
+#include "../../runtime/thread_storage_scope.h"
 
 namespace tvm {
 namespace tir {
@@ -94,7 +95,7 @@ class GPUCodeVerifier : public StmtExprVisitor {
       const auto* extent = op->value.as<IntImmNode>();
       ICHECK(extent);
 
-      std::string name = var.get()->name_hint;
+      std::string name = op->node.as<IterVarNode>()->thread_tag;
       // record the number of threads in a block
       if (name == "threadIdx.x" || name == "threadIdx.y" || name == "threadIdx.z" ||
           name == "vthread") {
@@ -153,6 +154,7 @@ class GPUCodeVerifier : public StmtExprVisitor {
             errors_.push_back(s.str());
           }
         };
+
         err("threads per block", thread_per_block_, max_threads_per_block_);
         err("local memory per block", local_memory_per_block_, max_local_memory_per_block_);
         err("shared memory per block", shared_memory_per_block_, max_shared_memory_per_block_);

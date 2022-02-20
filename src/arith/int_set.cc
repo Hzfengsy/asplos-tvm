@@ -794,6 +794,17 @@ IntSet EvalSet(PrimExpr e, const std::unordered_map<const VarNode*, IntSet>& dom
   return EvalSet(e, ConvertDomMap(dom_map));
 }
 
+Array<IntSet> EvalSet(const Array<PrimExpr>& exprs, const Map<Var, IntSet>& dom_map) {
+  Array<IntSet> result;
+  result.reserve(exprs.size());
+  Analyzer ana;
+  IntervalSetEvaluator m(&ana, dom_map);
+  for (const PrimExpr& e : exprs) {
+    result.push_back(m.Eval(e));
+  }
+  return result;
+}
+
 IntSet EvalSet(Range r, const Map<Var, IntSet>& dom_map) {
   Analyzer ana;
   IntervalSetEvaluator m(&ana, dom_map);

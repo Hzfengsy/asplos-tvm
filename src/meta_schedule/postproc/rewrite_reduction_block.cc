@@ -93,7 +93,9 @@ int FindDecomposePoint(const StmtSRef& block_sref) {
   Array<StmtSRef> loop_srefs = GetLoops(block_sref);
   int n = loop_srefs.size();
   for (int i = 0; i < n; ++i) {
-    if (GetLoopIterType(loop_srefs[i]) != IterVarType::kDataPar) {
+    const ForNode* loop = TVM_SREF_TO_FOR(loop, loop_srefs[i]);
+    if (loop->annotations.count("software_pipeline_stage") || GetLoopIterType(loop_srefs[i]) !=
+                                               IterVarType::kDataPar) {
       return i;
     }
   }
@@ -135,6 +137,16 @@ bool RewriteReductionBlockNode::Apply(const tir::Schedule& sch) {
       tir::BlockRV block_rv = GetRVFromSRef(sch, block_sref, global_var_name);
       Array<tir::LoopRV> loop_rvs = sch->GetLoops(block_rv);
       tir::BlockRV init_block_rv = sch->DecomposeReduction(block_rv, loop_rvs[decompose_point]);
+      // If the block is the isolation block of tensor core,
+      // we mark the init block for later postprocessor to handle the tensorization step
+      if (HasAnn(block_sref, tir::attr::meta_schedule_auto_tensorize, String("wmma_fill"))) {
+        sch->Unannotate(init_block_rv, tir::attr::meta_schedule_auto_tensorize);
+        sch->Unannotate(block_rv, tir::attr::meta_schedule_auto_tensorize);
+        Array<tir::BlockRV> init_inner_block_rv = sch->GetChildBlocks(init_block_rv);
+        ICHECK_EQ(init_inner_block_rv.size(), 1);
+        sch->Annotate(init_inner_block_rv[0], tir::attr::meta_schedule_auto_tensorize,
+                      String("wmma_fill"));
+      }
       ++rewritten;
     }
     if (rewritten == 0) {

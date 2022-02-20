@@ -29,7 +29,6 @@ from tvm.ir import IRModule
 from tvm.meta_schedule import ExtractedTask, extract_task_from_relay
 from tvm.runtime import NDArray, load_param_dict, save_param_dict
 from tvm.target import Target
-
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
@@ -184,7 +183,6 @@ def _save_cache(cache_dir: Optional[str], filename: str, objects: List[Any]) -> 
     path = os.path.join(os.path.expanduser(cache_dir), filename)
     with open(path, "wb") as o_f:
         pickle.dump(objects, o_f)
-
 
 def get_network(
     name: str,

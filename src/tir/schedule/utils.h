@@ -34,6 +34,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include "../../arith/ir_mutator_with_analyzer.h"
+#include "../../arith/ir_visitor_with_analyzer.h"
 #include "../../arith/pattern_match.h"
 #include "../../node/attr_registry.h"
 #include "../../printer/text_printer.h"
@@ -267,7 +269,7 @@ inline Map<Var, arith::IntSet> AsIntSet(const Map<Var, Range>& var_dom) {
   return {result.begin(), result.end()};
 }
 
-/**************** Loop extents ****************/
+/**************** PrimExpr parsing and extents ****************/
 
 /*!
  * \brief Get the extents of a loop
@@ -446,6 +448,16 @@ inline String BufferIndexType2Str(BufferIndexType buffer_index_type) {
     return "write";
   }
 }
+
+/******** Tensorization ********/
+/*!
+ * \brief Rewrite the block's outer loops to match the tensor intrin
+ * \param sch The schedule
+ * \param block_rv The block_rv we want to rewrite
+ * \param intrin_name The name of the tensor intrin we want to match
+ */
+Optional<LoopRV> TilingwithTensorIntrin(const tir::Schedule& sch, const tir::BlockRV& block_rv,
+                                        const String& intrin_name);
 
 }  // namespace tir
 }  // namespace tvm

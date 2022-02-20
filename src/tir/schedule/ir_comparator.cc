@@ -128,6 +128,9 @@ bool TensorizeComparator::VisitStmt_(const BlockNode* op, const Stmt& other) {
     if (!CompareArray(op->alloc_buffers, rhs->alloc_buffers, &TensorizeComparator::CompareBuffer)) {
       return false;
     }
+    for (const IterVar& block_iter : op->iter_vars) {
+      inner_iter_dom_map_.Set(block_iter->var, arith::IntSet::FromRange(block_iter->dom));
+    }
   }
   if (!CompareArray(op->writes, rhs->writes, &TensorizeComparator::CompareBufferRegion)) {
     return false;
@@ -292,8 +295,11 @@ bool TensorizeComparator::CompareBufferRegion(const BufferRegion& lhs, const Buf
     const std::vector<PrimExpr>& indices_base = it->second;
     for (int i = 0; i < offset; i++) {
       // High-dim region must be element-wise
-      if (!is_one(lhs->region[i]->extent)) return false;
-      if (!analyzer_.CanProveEqual(indices_base[i], lhs->region[i]->min)) return false;
+      arith::IntSet relaxed_int_set = arith::EvalSet({lhs->region[i]}, inner_iter_dom_map_)[0];
+      Range relaxed_range =
+          relaxed_int_set.CoverRange(Range::FromMinExtent(0, lhs->buffer->shape[i]));
+      if (!is_one(relaxed_range->extent)) return false;
+      if (!analyzer_.CanProveEqual(indices_base[i], relaxed_range->min)) return false;
     }
     for (size_t i = 0; i < rhs->region.size(); i++) {
       // check extent match
@@ -306,6 +312,7 @@ bool TensorizeComparator::CompareBufferRegion(const BufferRegion& lhs, const Buf
       }
     }
   }
+
   return true;
 }
 
@@ -327,6 +334,8 @@ bool TensorizeComparator::CompareBufferAccess(const T* lhs, const T* rhs) {
         os << "Buffer indices mismatch: " << lhs->indices[i + offset] << " vs " << rhs->indices[i];
         EmitError(os.str());
       }
+      LOG(INFO) << normalized_lhs_index << " " << rhs->indices[i];
+      LOG(INFO) << "Error " << GetRef<ObjectRef>(lhs) << " " << GetRef<ObjectRef>(rhs);
       return false;
     }
   }

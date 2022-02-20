@@ -451,5 +451,26 @@ def test_postproc_verify_gpu_6():
     assert not ctx.postprocs[0].apply(sch)
 
 
+def test_postproc_verify_gpu_4():
+    mod = GmmCuda0
+    ctx = _create_context(mod, target=_target())
+    sch = tir.Schedule(mod, debug_mask="all")
+    assert ctx.postprocs[0].apply(sch)
+
+
+def test_postproc_verify_gpu_5():
+    mod = GmmCuda1
+    ctx = _create_context(mod, target=_target())
+    sch = tir.Schedule(mod, debug_mask="all")
+    assert not ctx.postprocs[0].apply(sch)
+
+
+def test_postproc_verify_gpu_6():
+    mod = GmmCuda2
+    ctx = _create_context(mod, target=_target())
+    sch = tir.Schedule(mod, debug_mask="all")
+    assert not ctx.postprocs[0].apply(sch)
+
+
 if __name__ == "__main__":
     tvm.testing.main()

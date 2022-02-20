@@ -170,6 +170,14 @@ Map<Var, IntSet> ConvertDomMap(const std::unordered_map<const VarNode*, IntSet>&
  */
 IntSet EvalSet(PrimExpr e, const Map<IterVar, IntSet>& dom_map);
 /*!
+ * \brief Same as EvalSet, but takes Map<Var, IntSet>
+ *
+ * \param e The expression to be evaluated.
+ * \param dom_map The domain of each variable.
+ * \return An integer set that can cover all the possible values of e.
+ */
+IntSet EvalSet(PrimExpr e, const Map<Var, IntSet>& dom_map);
+/*!
  * \brief Same as EvalSet, but takes unordered_map
  *
  * \param e The expression to be evaluated.
@@ -177,6 +185,15 @@ IntSet EvalSet(PrimExpr e, const Map<IterVar, IntSet>& dom_map);
  * \return An integer set that can cover all the possible values of e.
  */
 IntSet EvalSet(PrimExpr e, const std::unordered_map<const tir::VarNode*, IntSet>& dom_map);
+/*!
+ * \brief Same as EvalSet, but takes Array<PrimExpr>
+ *
+ * \param exprs The expressions to be evaluated.
+ * \param dom_map The domain of each variable.
+ * \return An array of integer sets that can cover all the possible values.
+ */
+Array<IntSet> EvalSet(const Array<PrimExpr>& exprs, const Map<Var, IntSet>& dom_map);
+
 /*!
  * \brief Find an symbolic integer set that contains is union over
  *  all the possible conditional values in dom_map.

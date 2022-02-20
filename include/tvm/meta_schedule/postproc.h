@@ -150,6 +150,11 @@ class Postproc : public runtime::ObjectRef {
    * \return The postprocessor created.
    */
   TVM_DLL static Postproc RewriteTensorize(bool vectorize_init_loop = false);
+  /*!
+   * \brief Create a postprocessor that tensorize Tensor Core related components
+   * \return The postprocessor created.
+   */
+  TVM_DLL static Postproc RewriteTensorCore();
 
   /*!
    * \brief Creates a postprocessor that verifies if the GPU code is correct

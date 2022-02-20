@@ -53,6 +53,42 @@ class Matmul:
 
 
 @tvm.script.ir_module
+class MatmulCustomized:
+    @T.prim_func
+    def main(a: T.handle, b: T.handle, c: T.handle) -> None:
+        T.func_attr({"global_symbol": "main"})
+        A = T.match_buffer(a, (1024, 1024), "float32")
+        B = T.match_buffer(b, (1024, 1024), "float32")
+        C = T.match_buffer(c, (1024, 1024), "float32")
+        with T.block("root"):
+            for i, j, k in T.grid(1024, 1024, 1024):
+                with T.block("matmul"):
+                    T.block_attr({"schedule_rule": "tvm.meta_schedule.test.custom_search_space"})
+                    vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+                    with T.init():
+                        C[vi, vj] = 0.0
+                    C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+
+
+@tvm.script.ir_module
+class MatmulCustomizedNoneRule:
+    @T.prim_func
+    def main(a: T.handle, b: T.handle, c: T.handle) -> None:
+        T.func_attr({"global_symbol": "main"})
+        A = T.match_buffer(a, (1024, 1024), "float32")
+        B = T.match_buffer(b, (1024, 1024), "float32")
+        C = T.match_buffer(c, (1024, 1024), "float32")
+        with T.block("root"):
+            T.block_attr({"schedule_rule": "None"})
+            for i, j, k in T.grid(1024, 1024, 1024):
+                with T.block("matmul"):
+                    T.block_attr({"schedule_rule": "None"})
+                    vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+                    with T.init():
+                        C[vi, vj] = 0.0
+                    C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vk, vj]
+
+@tvm.script.ir_module
 class DuplicateMatmul:
     @T.prim_func
     def main(a: T.handle, b: T.handle, c: T.handle) -> None:
@@ -104,7 +140,7 @@ class TrinityMatmulProcessedForReference:
         A = T.match_buffer(a, [1024, 1024], dtype="float32")
         D = T.match_buffer(d, [1024, 1024], dtype="float32")
         # body
-        # with tir.block("root")
+        # with T.block("root")
         B = T.alloc_buffer([1024, 1024], dtype="float32")
         for i0_0, i1_0, i0_1, i1_1 in T.grid(16, 64, 64, 16):
             with T.block("A"):

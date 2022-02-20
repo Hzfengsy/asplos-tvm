@@ -21,5 +21,6 @@ from .rewrite_cooperative_fetch import RewriteCooperativeFetch
 from .rewrite_parallel_vectorize_unroll import RewriteParallelVectorizeUnroll
 from .rewrite_reduction_block import RewriteReductionBlock
 from .rewrite_unbound_block import RewriteUnboundBlock
+from .rewrite_tensor_core import RewriteTensorCore
 from .verify_gpu_code import VerifyGPUCode
 from .rewrite_tensorize import RewriteTensorize

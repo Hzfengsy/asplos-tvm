@@ -18,8 +18,6 @@
  */
 #include "./concrete_schedule.h"
 
-#include <random>
-
 namespace tvm {
 namespace tir {
 
@@ -539,6 +537,30 @@ BlockRV ConcreteScheduleNode::ReIndex(const BlockRV& block_rv, int buffer_index,
   return CreateRV<BlockRV>(result);
 }
 
+/******** Schedule: Data movement ********/
+
+BlockRV ConcreteScheduleNode::ReadAt(const LoopRV& loop_rv, const BlockRV& block_rv,
+                                     int read_buffer_index, const String& storage_scope) {
+  StmtSRef result{nullptr};
+  TVM_TIR_SCHEDULE_BEGIN();
+  result = tir::ReadAt(state_, this->GetSRef(loop_rv), this->GetSRef(block_rv), read_buffer_index,
+                       storage_scope);
+  TVM_TIR_SCHEDULE_END("read-at", this->error_render_level_);
+  this->state_->DebugVerify();
+  return CreateRV<BlockRV>(result);
+}
+
+BlockRV ConcreteScheduleNode::WriteAt(const LoopRV& loop_rv, const BlockRV& block_rv,
+                                      int write_buffer_index, const String& storage_scope) {
+  StmtSRef result{nullptr};
+  TVM_TIR_SCHEDULE_BEGIN();
+  result = tir::WriteAt(state_, this->GetSRef(loop_rv), this->GetSRef(block_rv), write_buffer_index,
+                        storage_scope);
+  TVM_TIR_SCHEDULE_END("write-at", this->error_render_level_);
+  this->state_->DebugVerify();
+  return CreateRV<BlockRV>(result);
+}
+
 /******** Schedule: Compute location ********/
 
 void ConcreteScheduleNode::ComputeAt(const BlockRV& block_rv, const LoopRV& loop_rv,
@@ -698,8 +720,7 @@ void ConcreteScheduleNode::Unannotate(const LoopRV& loop_rv, const String& ann_k
 void ConcreteScheduleNode::Annotate(const BlockRV& block_rv, const String& ann_key,
                                     const ObjectRef& ann_val) {
   TVM_TIR_SCHEDULE_BEGIN();
-  tir::Annotate(state_, this->GetSRef(block_rv), ann_key,
-                this->CheckAndGetAnnotationValue(ann_val));
+  tir::Annotate(state_, this->GetSRef(block_rv), ann_key, this->CheckAndGetAnnotationValue(ann_val));
   this->state_->DebugVerify();
   TVM_TIR_SCHEDULE_END("annotate", this->error_render_level_);
 }

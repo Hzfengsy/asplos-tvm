@@ -65,6 +65,26 @@ Optional<BlockRV> ParseAnnotate(const Schedule& sch, const Instruction& inst,
   return Downcast<BlockRV>(inst->inputs[0]);
 }
 
+/*!
+ * \brief Parse instruction: sch.annotate(..., attr::meta_schedule_tensor_core_enabled)
+ * \param sch The schedule
+ * \param inst The instruction to be parsed
+ * \return Whether ths parsing is successful
+ */
+bool ParseTensorCoreAnn(const Schedule& sch, const Instruction& inst) {
+  static InstructionKind inst_kind_annotate = InstructionKind::Get("Annotate");
+  if (!inst->kind.same_as(inst_kind_annotate)) {
+    return false;
+  }
+  ICHECK_EQ(inst->inputs.size(), 2);
+  ICHECK_EQ(inst->attrs.size(), 1);
+  String ann_key = Downcast<String>(inst->attrs[0]);
+  if (ann_key != attr::meta_schedule_tensor_core_enabled) {
+    return false;
+  }
+  return true;
+}
+
 }  // namespace tir
 
 namespace meta_schedule {
@@ -101,6 +121,10 @@ bool RewriteCooperativeFetchNode::Apply(const tir::Schedule& sch) {
       thread_extent_y = new_thread_extent.value()->value;
       continue;
     }
+    if (tir::ParseTensorCoreAnn(sch, inst)) {
+      thread_extent_x = 32;
+      continue;
+    }
     Optional<tir::BlockRV> opt_block_rv = tir::ParseAnnotate(sch, inst, &vector_lane);
     if (!opt_block_rv.defined()) {
       continue;
@@ -134,6 +158,7 @@ bool RewriteCooperativeFetchNode::Apply(const tir::Schedule& sch) {
           sch->Bind(split[2], "threadIdx.x");
           sch->Bind(split[1], "threadIdx.y");
         }
+        sch->StorageAlign(block, 0, -2, 32, 8);
       } else {
         if (vector_lane > 1) {
           Array<tir::LoopRV> split = sch->Split(fused, {NullOpt,                   //

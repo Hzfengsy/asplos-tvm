@@ -33,6 +33,7 @@ Block WithAnnotation(const BlockNode* block, const String& attr_key, const Objec
 }
 
 /******** Buffer Related ********/
+
 Buffer WithScope(const Buffer& buffer, const String& scope) {
   ObjectPtr<BufferNode> new_buffer = make_object<BufferNode>(*buffer.get());
   ObjectPtr<VarNode> new_var = make_object<VarNode>(*buffer->data.get());
@@ -40,6 +41,25 @@ Buffer WithScope(const Buffer& buffer, const String& scope) {
   new_var->type_annotation = PointerType(ptr_type->element_type, scope);
   new_buffer->data = Var(new_var->name_hint + "_" + scope, new_var->type_annotation);
   new_buffer->name = buffer->name + "_" + scope;
+  return Buffer(new_buffer);
+}
+
+Buffer WithBlockIters(const Buffer& buffer, const Array<IterVar>& block_iters,
+                      const std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual>& covered) {
+  ObjectPtr<BufferNode> new_buffer = make_object<BufferNode>(*buffer.get());
+  ObjectPtr<VarNode> new_var = make_object<VarNode>(*buffer->data.get());
+  std::vector<PrimExpr> new_shape;
+  std::vector<PrimExpr> new_strides;
+  for (const auto& iter : block_iters) {
+    if (covered.count(iter->var)) {
+      new_shape.push_back(iter->dom->min + iter->dom->extent);
+    }
+  }
+  new_strides.clear();
+  new_buffer->shape = new_shape;
+  new_buffer->strides = new_strides;
+  new_buffer->data = Var(new_var->name_hint + "_reindex", new_var->type_annotation);
+  new_buffer->name = buffer->name + "_reindex";
   return Buffer(new_buffer);
 }
 
@@ -305,6 +325,36 @@ Optional<LoopRV> TileWithTensorIntrin(const tir::Schedule& sch, const tir::Block
 }
 
 TVM_REGISTER_GLOBAL("tir.schedule.TileWithTensorIntrin").set_body_typed(TileWithTensorIntrin);
+/******** BlockBufferAccessSimplifier ********/
+void BlockBufferAccessSimplifier::SimplifyAccessRegion(Array<BufferRegion>* old_access_regions) {
+  auto fmutate = [this](const BufferRegion& buffer_region) {
+    std::vector<Range> new_buffer_region;
+    for (const auto& range : buffer_region->region) {
+      new_buffer_region.push_back(Range::FromMinExtent(analyzer_->Simplify(range->min),
+                                                       analyzer_->Simplify(range->extent)));
+    }
+    return BufferRegion(buffer_region->buffer, new_buffer_region);
+  };
+  (*old_access_regions).MutateByApply(fmutate);
+}
+
+Stmt BlockBufferAccessSimplifier::VisitStmt_(const BlockNode* op) {
+  Block block = Downcast<Block>(arith::IRMutatorWithAnalyzer::VisitStmt_(op));
+  auto* n = block.CopyOnWrite();
+  SimplifyAccessRegion(&n->reads);
+  SimplifyAccessRegion(&n->writes);
+  return std::move(block);
+}
+
+Stmt BlockBufferAccessSimplifier::VisitStmt_(const BufferStoreNode* op) {
+  auto node = Downcast<BufferStore>(arith::IRMutatorWithAnalyzer::VisitStmt_(op));
+  return VisitBufferAccess(std::move(node));
+}
+
+PrimExpr BlockBufferAccessSimplifier::VisitExpr_(const BufferLoadNode* op) {
+  auto node = Downcast<BufferLoad>(arith::IRMutatorWithAnalyzer::VisitExpr_(op));
+  return VisitBufferAccess(std::move(node));
+}
 
 /******** BlockBufferAccessSimplifier ********/
 void BlockBufferAccessSimplifier::SimplifyAccessRegion(Array<BufferRegion>* old_access_regions) {

@@ -19,6 +19,9 @@
 #include <tvm/runtime/container/optional.h>
 #include <tvm/tir/expr.h>
 
+#include <unordered_map>
+
+#include "../ir_comparator.h"
 #include "../utils.h"
 
 namespace tvm {
@@ -978,6 +981,344 @@ std::pair<Array<StmtSRef>, std::vector<int>> CollectComputeLocation(const Schedu
 
   return std::make_pair(location_srefs, location_indices);
 }
+
+/******** Auto Tensorization ********/
+
+class AutoTensorizeExtractor : public TensorizeComparator {
+ public:
+  explicit AutoTensorizeExtractor() : TensorizeComparator(IRModule(), false) {}
+
+ private:
+  bool VisitExprDefault_(const Object* op, const PrimExpr& other) override;
+  bool VisitStmtDefault_(const Object* op, const Stmt& other) override;
+
+  bool VisitStmt_(const BlockNode* op, const Stmt& other) override;
+  bool VisitStmt_(const BufferStoreNode* op, const Stmt& other) override;
+
+  bool VisitExpr_(const BufferLoadNode* op, const PrimExpr& other) override;
+
+  bool CompareBuffer(const Buffer& lhs, const Buffer& rhs) override;
+  template <typename T>
+  bool CompareBufferAccess(const T* lhs, const T* rhs);
+  template <typename T, typename F>
+  bool CompareArray(const Array<T>& lhs, const Array<T>& rhs, F cmp);
+
+ public:
+  std::vector<IterVar> lhs_iters_, rhs_iters_;
+  std::unordered_map<Buffer, Array<PrimExpr>, ObjectPtrHash, ObjectPtrEqual>
+      lhs_buffer_indices_map_;
+  std::unordered_map<Buffer, Array<PrimExpr>, ObjectPtrHash, ObjectPtrEqual>
+      rhs_buffer_indices_map_;
+};
+
+bool AutoTensorizeExtractor::VisitExprDefault_(const Object* op, const PrimExpr& other) {
+  return false;
+}
+
+bool AutoTensorizeExtractor::VisitStmtDefault_(const Object* op, const Stmt& other) {
+  return false;
+}
+
+bool AutoTensorizeExtractor::VisitStmt_(const BlockNode* op, const Stmt& other) {
+  const auto* rhs = other.as<BlockNode>();
+  // Check block equality.
+  // All iter vars and buffer regions including the order should match.
+  // When checking iter vars, DefEqual is used to remap variables.
+  if (!is_scope_block) {
+    if (!CompareArray(op->iter_vars, rhs->iter_vars, &AutoTensorizeExtractor::CompareIterVar)) {
+      return false;
+    }
+    if (!CompareAnnotationMap(op->annotations, rhs->annotations)) {
+      return false;
+    }
+    if (!CompareArray(op->alloc_buffers, rhs->alloc_buffers,
+                      &AutoTensorizeExtractor::CompareBuffer)) {
+      return false;
+    }
+    for (const IterVar& block_iter : op->iter_vars) {
+      inner_iter_dom_map_.Set(block_iter->var, arith::IntSet::FromRange(block_iter->dom));
+    }
+  } else {
+    auto iter_collect = [&](const BlockNode* op, std::vector<IterVar>& iters) -> bool {
+      for (const auto& iter : op->iter_vars) {
+        analyzer_.Bind(iter->var, iter->dom);
+        if (iter->iter_type == IterVarType::kDataPar ||
+            iter->iter_type == IterVarType::kCommReduce) {
+          iters.push_back(iter);
+        } else {
+          return false;
+        }
+      }
+      return true;
+    };
+    if (!iter_collect(op, lhs_iters_)) {
+      return false;
+    }
+    if (!iter_collect(rhs, rhs_iters_)) {
+      return false;
+    }
+  }
+  is_scope_block = false;
+  return VisitStmt(op->body, rhs->body);
+}
+
+bool AutoTensorizeExtractor::CompareBuffer(const Buffer& lhs, const Buffer& rhs) {
+  if (lhs.same_as(rhs)) return true;
+  auto it = rhs_buffer_map_.find(rhs);
+  bool equal;
+  if (it != rhs_buffer_map_.end()) {
+    equal = (*it).second.same_as(lhs);
+  } else {
+    // Remap both buffer itself and buffer data, skip buffer shape
+    equal = DefEqual(lhs->data, rhs->data) && lhs->dtype == rhs->dtype;
+    if (equal) {
+      rhs_buffer_map_[rhs] = lhs;
+    }
+  }
+  return equal;
+}
+
+bool AutoTensorizeExtractor::VisitStmt_(const BufferStoreNode* op, const Stmt& other) {
+  const auto* rhs = other.as<BufferStoreNode>();
+  return AutoTensorizeExtractor::CompareBufferAccess(op, rhs) && VisitExpr(op->value, rhs->value);
+}
+
+bool AutoTensorizeExtractor::VisitExpr_(const BufferLoadNode* op, const PrimExpr& other) {
+  const auto* rhs = other.as<BufferLoadNode>();
+  return AutoTensorizeExtractor::CompareBufferAccess(op, rhs);
+}
+
+template <typename T>
+bool AutoTensorizeExtractor::CompareBufferAccess(const T* lhs, const T* rhs) {
+  if (!CompareBuffer(lhs->buffer, rhs->buffer)) return false;
+  auto it_lhs = lhs_buffer_indices_map_.find(lhs->buffer);
+  if (it_lhs == lhs_buffer_indices_map_.end()) {
+    if (rhs_buffer_indices_map_.find(rhs->buffer) != rhs_buffer_indices_map_.end()) {
+      return false;
+    }
+    std::vector<PrimExpr> lhs_indices;
+    for (const auto& index : lhs->indices) {
+      lhs_indices.push_back(analyzer_.Simplify(index));
+    }
+    for (const auto& index : rhs->indices) {
+      if (!index.template as<VarNode>()) return false;
+    }
+    lhs_buffer_indices_map_[lhs->buffer] = lhs_indices;
+    rhs_buffer_indices_map_[rhs->buffer] = rhs->indices;
+  } else {
+    auto it_rhs = rhs_buffer_indices_map_.find(rhs->buffer);
+    if (it_rhs == rhs_buffer_indices_map_.end()) {
+      return false;
+    }
+    auto indices_check = [&](const Array<PrimExpr>& indices,
+                             const Array<PrimExpr>& old_indices) -> bool {
+      if (indices.size() != old_indices.size()) {
+        return false;
+      }
+      for (size_t i = 0; i < indices.size(); ++i) {
+        if (!analyzer_.CanProveEqual(indices[i], old_indices[i])) {
+          return false;
+        }
+      }
+      return true;
+    };
+    if (!indices_check(lhs->indices, it_lhs->second)) return false;
+    if (!indices_check(rhs->indices, it_rhs->second)) return false;
+  }
+  return true;
+}
+
+template <typename T, typename F>
+bool AutoTensorizeExtractor::CompareArray(const Array<T>& lhs, const Array<T>& rhs, F cmp) {
+  if (lhs.same_as(rhs)) return true;
+  if (lhs.size() != rhs.size()) return false;
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    if (!(this->*cmp)(lhs[i], rhs[i])) return false;
+  }
+  return true;
+}
+
+class MappingProposer {
+ public:
+  explicit MappingProposer(AutoTensorizeExtractor* extractor) : extractor_(extractor) {}
+
+  void Propose() {
+    CollectFeasibleSet();
+    ProposeAllFuseMapping();
+  }
+
+ private:
+  using VarSet = std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual>;
+
+  void SetIntersection(VarSet* var_set, const VarSet& other) {
+    VarSet to_be_removed;
+    for (const Var& var : (*var_set)) {
+      if (other.find(var) == other.end()) to_be_removed.insert(var);
+    }
+    for (const Var& var : to_be_removed) {
+      var_set->erase(var);
+    }
+  }
+
+  void SetSubtraction(VarSet* var_set, const VarSet& other) {
+    for (const Var& var : other) {
+      var_set->erase(var);
+    }
+  }
+
+  void CollectFeasibleSet() {
+    std::unordered_map<Buffer, VarSet, ObjectPtrHash, ObjectPtrEqual> 
+      lhs_buffer_var_map, rhs_buffer_var_map;
+    for (const auto& it : extractor_->rhs_buffer_indices_map_) {
+      VarSet lhs_vars, rhs_vars;
+      auto lhs_buffer_it = extractor_->rhs_buffer_map_.find(it.first);
+      ICHECK(lhs_buffer_it != extractor_->rhs_buffer_map_.end());
+      for (const PrimExpr& index : extractor_->lhs_buffer_indices_map_[lhs_buffer_it->second]) {
+        PreOrderVisit(index, [&](const ObjectRef& obj) -> bool {
+          if (const VarNode* var = obj.as<VarNode>()) {
+            lhs_vars.insert(GetRef<Var>(var));
+          }
+          return true;
+        });
+      }
+      for (const PrimExpr& rhs_index : it.second) {
+        if (const VarNode* var_ptr = rhs_index.as<VarNode>()) {
+          Var var = GetRef<Var>(var_ptr);
+          rhs_vars.insert(var);
+          if (rhs_feasible_vars_.find(var) == rhs_feasible_vars_.end()) {
+            rhs_feasible_vars_[var] = lhs_vars;
+          } else {
+            SetIntersection(&rhs_feasible_vars_[var], lhs_vars);
+          }
+        } else {
+          LOG(FATAL);
+        }
+      }
+      lhs_buffer_var_map[lhs_buffer_it->second] = std::move(lhs_vars);
+      rhs_buffer_var_map[lhs_buffer_it->second] = std::move(rhs_vars);
+    }
+    for (const auto& it : extractor_->rhs_buffer_indices_map_) {
+      auto lhs_buffer_it = extractor_->rhs_buffer_map_.find(it.first);
+      ICHECK(lhs_buffer_it != extractor_->rhs_buffer_map_.end());
+      const VarSet& lhs_vars = lhs_buffer_var_map[lhs_buffer_it->second];
+      const VarSet& rhs_vars = rhs_buffer_var_map[lhs_buffer_it->second];
+      for (const IterVar& iter : extractor_->rhs_iters_) {
+        if (rhs_vars.find(iter->var) == rhs_vars.end()) {
+          SetSubtraction(&rhs_feasible_vars_[iter->var], lhs_vars);
+        }
+      }
+    }
+    for (const auto& it : rhs_feasible_vars_) {
+      for (const auto& lhs_var : it.second) {
+        if (lhs_feasible_vars_.find(lhs_var) == lhs_feasible_vars_.end()) {
+          lhs_feasible_vars_[lhs_var] = std::move(VarSet());
+        }
+        lhs_feasible_vars_[lhs_var].insert(it.first);
+      }
+    }
+    for (const auto& iter : extractor_->lhs_iters_) {
+      lhs_representers.push_back(iter->var.copy_with_suffix("_l"));
+    }
+    for (const auto& it : extractor_->rhs_buffer_map_) {
+      lhs_buffer_map_[it.second] = it.first;
+    }
+  }
+
+  void ProposeAllFuseMapping() {
+    std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> fused_iter, extent_map;
+    for (const auto& iter : extractor_->rhs_iters_) {
+      fused_iter[iter->var] = 0;
+    }
+    for (const auto& iter : extractor_->lhs_iters_) {
+      extent_map[iter->var] = iter->dom->extent;
+    }
+    std::vector<PrimExpr> tgt_iters;
+    for (size_t i = 0; i < extractor_->lhs_iters_.size(); ++i) {
+      const VarSet& feasible = lhs_feasible_vars_[extractor_->lhs_iters_[i]->var];
+      if (feasible.empty()) {
+        tgt_iters.push_back(lhs_representers[i]);
+      } else if (feasible.size() == 1) {
+        Var rhs_var = *feasible.begin();
+        fused_iter[rhs_var] =
+            fused_iter[rhs_var] * extent_map[extractor_->lhs_iters_[i]->var] + lhs_representers[i];
+      } else {
+        // give up this proposal
+        return;
+      }
+    }
+    arith::Analyzer analyzer;
+    for (const auto& iter : extractor_->rhs_iters_) {
+      tgt_iters.push_back(analyzer.Simplify(fused_iter[iter->var]));
+    }
+    mappings_.emplace_back(lhs_representers, tgt_iters);
+  }
+
+ public:
+  std::vector<Var> lhs_representers;
+  std::unordered_map<Buffer, Buffer, ObjectHash, ObjectEqual> lhs_buffer_map_;
+  std::unordered_map<Var, VarSet, ObjectPtrHash, ObjectPtrEqual> rhs_feasible_vars_;
+  std::unordered_map<Var, VarSet, ObjectPtrHash, ObjectPtrEqual> lhs_feasible_vars_;
+  std::vector<IndexMap> mappings_;
+  AutoTensorizeExtractor* extractor_;
+};
+
+Optional<LayoutInfo> GetTensorizeLayoutInfo(const tir::ScheduleState& self,
+                                            const tir::StmtSRef& block_sref,
+                                            const tir::PrimFunc& desc_func) {
+  arith::Analyzer analyzer;
+  const tir::BlockRealize& block = tir::GetBlockRealize(self, block_sref);
+  // Step 1. Analyze desc_func, extract its block, loops and loop vars
+  const tir::BlockRealizeNode* desc_block = nullptr;
+  std::vector<const tir::ForNode*> desc_loops;
+  std::unordered_set<const tir::VarNode*> desc_loop_vars;
+  const auto* desc_scope_realize = desc_func->body.as<tir::BlockRealizeNode>();
+  ICHECK(desc_scope_realize);
+  {
+    auto f_visit = [&desc_block, &desc_loops, &desc_loop_vars,
+                    &analyzer](const ObjectRef& obj) -> bool {
+      // Extract the block
+      if (const auto* block = obj.as<tir::BlockRealizeNode>()) {
+        desc_block = block;
+        return false;
+      }
+      // Extract the loops
+      if (const auto* loop = obj.as<tir::ForNode>()) {
+        desc_loops.push_back(loop);
+        desc_loop_vars.insert(loop->loop_var.get());
+        if (!analyzer.CanProve(loop->min == 0)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    tir::PostOrderVisit(desc_scope_realize->block->body, f_visit);
+    std::reverse(desc_loops.begin(), desc_loops.end());
+    ICHECK(desc_block);
+  }
+  // Step 2. Check if `desc_block` matches `block`
+  // Ignore the scope of buffers when comparing, since we can do cache_read/write
+  const StmtSRef& scope_sref = GetScopeRoot(self, block_sref, false);
+  const tir::BlockNode* scope_block = TVM_SREF_TO_BLOCK(scope_block, scope_sref);
+  AutoTensorizeExtractor extractor;
+  MappingProposer proposer(&extractor);
+  if (!extractor.VisitStmt(block->block, desc_block->block)) {
+    return NullOpt;
+  }
+  proposer.Propose();
+  if (proposer.mappings_.empty()) {
+    return NullOpt;
+  }
+  ObjectPtr<LayoutInfoNode> ret = make_object<LayoutInfoNode>();
+  // Only using 1 layout now
+  ret->mapping = std::move(proposer.mappings_[0]);
+  ret->lhs_buffer_map = std::move(proposer.lhs_buffer_map_);
+  ret->rhs_indices_map = std::move(extractor.rhs_buffer_indices_map_);
+  ret->lhs_iters = std::move(extractor.lhs_iters_);
+  ret->rhs_iters = std::move(extractor.rhs_iters_);
+  return LayoutInfo(ret);
+}
+
+TVM_REGISTER_NODE_TYPE(LayoutInfoNode);
 
 /******** Producer-consumer relation ********/
 

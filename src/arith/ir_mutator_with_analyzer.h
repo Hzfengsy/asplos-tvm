@@ -56,6 +56,7 @@ class IRMutatorWithAnalyzer : public tir::StmtExprMutator {
   tir::Stmt VisitStmt_(const tir::AttrStmtNode* op) override;
   tir::Stmt VisitStmt_(const tir::AssertStmtNode* op) override;
   PrimExpr VisitExpr_(const tir::LetNode* op) override;
+  tir::Stmt VisitStmt_(const tir::BlockNode* op) override;
   PrimExpr VisitExpr_(const tir::SelectNode* op) override;
   PrimExpr VisitExpr_(const tir::CallNode* op) override;
   PrimExpr VisitExpr_(const tir::ReduceNode* op) override;

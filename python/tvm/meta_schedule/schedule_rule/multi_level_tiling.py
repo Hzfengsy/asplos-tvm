@@ -53,6 +53,10 @@ class MultiLevelTiling(ScheduleRule):
         For each level of tiles, which thread axis it is bound to. Recommended:
         - None on CPU
         - [blockIdx.x, vthread.x, threadIdx.x] on GPU
+    use_tensor_core : bool
+        Whether to apply tensor core wmma intrinsic for the computation
+    add_local_stage : bool
+        Whether to add local stage when loading from global to shared
     max_innermost_factor : Optional[int]
         The maximum size of the innermost factor. None means no limit
     vector_load_lens : Optional[List[int]]
@@ -68,6 +72,8 @@ class MultiLevelTiling(ScheduleRule):
         self,
         structure: str,
         tile_binds: Optional[List[str]] = None,
+        use_tensor_core: bool = False,
+        add_local_stage: bool = True,
         max_innermost_factor: Optional[int] = None,
         vector_load_lens: Optional[List[int]] = None,
         reuse_read: Optional[ReuseType] = None,
@@ -77,6 +83,8 @@ class MultiLevelTiling(ScheduleRule):
             _ffi_api.ScheduleRuleMultiLevelTiling,  # type: ignore # pylint: disable=no-member
             structure,
             tile_binds,
+            use_tensor_core,
+            add_local_stage,
             max_innermost_factor,
             vector_load_lens,
             reuse_read.as_dict() if reuse_read is not None else None,

@@ -59,7 +59,8 @@ Array<ObjectRef> TranslateInputRVs(const Array<ObjectRef>& inputs,
     if (!input.defined() ||                   // constant: nullptr
         input->IsInstance<StringObj>() ||     // constant: string
         input->IsInstance<IntImmNode>() ||    // constant: integer
-        input->IsInstance<FloatImmNode>()) {  // constant: float
+        input->IsInstance<FloatImmNode>() ||  // constant: float
+        input->IsInstance<runtime::ArrayNode>()) {  // constant: array
       result.push_back(input);
     } else if (input->IsInstance<BlockRVNode>() ||  // RV: block
                input->IsInstance<LoopRVNode>() ||   // RV: loop

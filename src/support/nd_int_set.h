@@ -144,6 +144,29 @@ inline NDIntSet NDIntSetEval(
   return ret;
 }
 
+/*!
+ * \brief Output the N-dimensional integer set to a stream.
+ * \param os The output stream.
+ * \param nd_int_set The N-dimensional integer set to be output.
+ * \return The output stream.
+ */
+inline std::ostream& operator<<(std::ostream& os, const NDIntSet& nd_int_set) {
+  os << '[';
+  bool is_first = true;
+  for (const arith::IntSet& int_set : nd_int_set) {
+    if (is_first) {
+      is_first = false;
+    } else {
+      os << ", ";
+    }
+    PrimExpr min = int_set.min();
+    PrimExpr max = int_set.max();
+    os << min << ":" << max;
+  }
+  os << ']';
+  return os;
+}
+
 }  // namespace support
 }  // namespace tvm
 

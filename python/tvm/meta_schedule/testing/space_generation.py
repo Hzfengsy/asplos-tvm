@@ -15,10 +15,30 @@
 # specific language governing permissions and limitations
 # under the License.
 # pylint: disable=missing-module-docstring,missing-function-docstring,missing-class-docstring
-from typing import List
+from typing import List, Union
 
-from tvm.tir import Schedule
+from tvm.ir import IRModule
+from tvm.meta_schedule import TuneContext
+from tvm.meta_schedule.space_generator import PostOrderApply
+from tvm.target import Target
+from tvm.tir import PrimFunc, Schedule
 from tvm.tir.schedule import Trace
+
+from . import schedule_rule as sch_rule
+
+
+def create_context(mod: Union[IRModule, PrimFunc], target: Target) -> TuneContext:
+    ctx = TuneContext(
+        mod=mod,
+        target=target,
+        space_generator=PostOrderApply(),
+        sch_rules=sch_rule.get(target),
+        task_name="test",
+    )
+    ctx.space_generator.initialize_with_tune_context(ctx)
+    for rule in ctx.sch_rules:
+        rule.initialize_with_tune_context(ctx)
+    return ctx
 
 
 def check_trace(spaces: List[Schedule], expected: List[List[str]]):
@@ -31,3 +51,15 @@ def check_trace(spaces: List[Schedule], expected: List[List[str]]):
         actual_traces.add(str_trace)
         assert str_trace in expected_traces, "\n" + str_trace
     assert len(expected_traces) == len(actual_traces)
+
+
+def debug_print_spaces(spaces: List[Schedule], trace_as_list: bool) -> None:
+    for i, space in enumerate(spaces):
+        print(f"##### Space {i}")
+        print(space.mod.script())
+        trace = Trace(space.trace.insts, {})
+        trace = trace.simplified(remove_postproc=True)
+        if trace_as_list:
+            print(str(trace).strip().splitlines())
+        else:
+            print(trace)

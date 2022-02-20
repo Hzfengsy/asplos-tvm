@@ -223,6 +223,39 @@ def func_with_block_predicate() -> None:
             B[ax] = A[ax] + 1.0
 
 
+@T.prim_func
+def GMM(A: T.Buffer[(512, 512), "float16"], B: T.Buffer[(512, 512), "float16"], C: T.Buffer[(512, 512), "float32"]) -> None:
+    # function attr dict
+    T.func_attr({"global_symbol": "main", "tir.noalias": True})
+    # body
+    # with T.block("root")
+    for i0, i1, i2 in T.grid(512, 512, 512):
+        with T.block("C"):
+            i, j, k = T.axis.remap("SSR", [i0, i1, i2])
+            T.reads(C[i, j], A[i, k], B[k, j])
+            T.writes(C[i, j])
+            with T.init():
+                C[i, j] = T.float32(0)
+            C[i, j] = C[i, j] + T.cast(A[i, k], "float32") * T.cast(B[k, j], "float32")
+
+
+@T.prim_func
+def Conv2D(var_inputs: T.handle, var_weight: T.handle, var_conv2d_nhwc: T.handle) -> None:
+    inputs = T.match_buffer(var_inputs, [1, 224, 224, 3], align=128, offset_factor=1)
+    weight = T.match_buffer(var_weight, [7, 7, 3, 64], align=128, offset_factor=1)
+    conv2d_nhwc = T.match_buffer(var_conv2d_nhwc, [1, 112, 112, 64], align=128, offset_factor=1)
+    PadInput = T.alloc_buffer([1, 230, 230, 3], elem_offset=0, align=128, offset_factor=1)
+    for i0, i1, i2, i3 in T.grid(1, 230, 230, 3):
+        with T.block("PadInput"):
+            i0_1, i1_1, i2_1, i3_1 = T.axis.remap("SSSS", [i0, i1, i2, i3])
+            PadInput[i0_1, i1_1, i2_1, i3_1] = T.if_then_else(((((i1_1 >= 3) and (i1_1 < 227)) and (i2_1 >= 3)) and (i2_1 < 227)), inputs[i0_1, (i1_1 - 3), (i2_1 - 3), i3_1], T.float32(0), dtype="float32")
+    for i0, i1, i2, i3, i4, i5, i6 in T.grid(1, 112, 112, 64, 7, 7, 3):
+        with T.block("conv2d_nhwc"):
+            n, h, w, co, rh, rw, rc = T.axis.remap("SSSSRRR", [i0, i1, i2, i3, i4, i5, i6])
+            with T.init():
+                conv2d_nhwc[n, h, w, co] = T.float32(0)
+            conv2d_nhwc[n, h, w, co] = (conv2d_nhwc[n, h, w, co] + (PadInput[n, ((h*2) + rh), ((w*2) + rw), ((T.floordiv(co, 64)*3) + rc)]*weight[rh, rw, rc, co]))
+
 ########## Expected function after cache_read ##########
 
 
@@ -925,6 +958,27 @@ def test_cache_write_fail_invalid_storage_scope(use_block_name):
     block_b = "B" if use_block_name else sch.get_block("B")
     with pytest.raises(tvm.tir.ScheduleError):
         sch.cache_write(block_b, 0, "test_scope")
+
+
+########## Testcases for reindex ##########
+
+
+def test_reindex_read():
+    sch = tir.Schedule(Conv2D, debug_mask="all")
+    block = sch.get_block("conv2d_nhwc")
+    sch.reindex(block, 1, False)
+    print(sch.mod.script())
+
+
+def test_reindex_write():
+    sch = tir.Schedule(GMM, debug_mask="all")
+    block = sch.get_block("C")
+    sch.reindex(block, 0, True)
+    print(sch.mod.script())
+
+
+def test_reindex_fail():
+    pass
 
 
 if __name__ == "__main__":

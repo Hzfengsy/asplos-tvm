@@ -277,7 +277,14 @@ TVM_DLL StmtSRef CacheWrite(ScheduleState self, const StmtSRef& block_sref, int 
  * \return The reindex stage block.
  */
 TVM_DLL StmtSRef ReIndex(ScheduleState self, const StmtSRef& block_sref, int buffer_index,
-                         BufferIndexType buffer_index_type);
+/******** Schedule: Data movement ********/
+
+TVM_DLL StmtSRef ReadAt(ScheduleState self, const StmtSRef& loop_sref, const StmtSRef& block_sref,
+                        int read_buffer_index, const String& storage_scope);
+
+TVM_DLL StmtSRef WriteAt(ScheduleState self, const StmtSRef& loop_sref, const StmtSRef& block_sref,
+                         int write_buffer_index, const String& storage_scope);
+
 /******** Schedule: Compute location ********/
 /*!
  * \brief Move a producer block under the specific loop, and regenerate the
@@ -414,6 +421,18 @@ TVM_DLL void SetAxisSeparator(ScheduleState self, const StmtSRef& block_sref, in
                               BufferIndexType buffer_index_type,
                               const Array<IntImm>& axis_separators);
 
+/*!
+ * \brief Set the axis separator of a buffer, where the buffer is specified by a block and a read
+ * or write index
+ * \param block_rv The block that accesses the target buffer.
+ * \param buffer_index The index of the buffer in block's read or write region.
+ * \param buffer_index_type The type of the buffer index, kRead or kWrite.
+ * \param axis_separators The axis separator of the buffer
+ */
+TVM_DLL void SetAxisSeparator(ScheduleState self, const StmtSRef& block_sref, int buffer_index,
+                              BufferIndexType buffer_index_type,
+                              const Array<IntImm>& axis_separators);
+
 /******** Schedule: Blockize & Tensorize ********/
 
 /*!
@@ -443,6 +462,34 @@ TVM_DLL void Tensorize(ScheduleState self, const StmtSRef& block_or_loop_sref,
  */
 TVM_DLL void Annotate(ScheduleState self, const StmtSRef& sref, const String& ann_key,
                       const ObjectRef& ann_val);
+
+/******** Schedule: Layout transformation ********/
+/*!
+ * \brief Apply a transformation represented by IndexMap to buffer
+ * \details The indices and the access region to the target buffer is transformed by the given
+ * index_map. The index_map is also used to infer the new shape of the buffer. Buffer must be
+ * one of the parameter of the function, or allocated in some blocks (it cannot be a buffer
+ * subregion created via match_buffer).
+ * \param self The state of the schedule
+ * \param block_sref The block sref that accesses the target buffer.
+ * \param buffer_index The index of the buffer in block's read or write region.
+ * \param is_write_index Whether the buffer_index is the index of the block's write region.
+ * \param index_map The transformation to apply.
+ */
+TVM_DLL void TransformLayout(ScheduleState self, const StmtSRef& block_sref, int buffer_index,
+                             bool is_write_index, const IndexMap& index_map);
+
+/*!
+ * \brief Apply a transformation represented by IndexMap to block
+ * \details The block signatures and the block body is transformed by the given index_map.
+ * The index_map is required to be affine since we need its inverse mapping
+ * \param self The state of the schedule
+ * \param block_sref The block sref that refers to the block to be transformed
+ * \param affine_index_map The transformation to apply.
+ */
+TVM_DLL void TransformBlockLayout(ScheduleState self, const StmtSRef& block_sref,
+                                  const IndexMap& index_map);
+
 /*!
  * \brief Unannotate a block/loop's annotation with key ann_key
  * \param self The state of the schedule
