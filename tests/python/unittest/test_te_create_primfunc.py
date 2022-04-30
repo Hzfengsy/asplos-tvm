@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License
 # pylint: disable=missing-function-docstring,missing-module-docstring
+import sys
+import pytest
 import numpy as np
 import tvm
 import tvm.testing
@@ -658,24 +660,28 @@ def test_argmax():
     tvm.testing.assert_allclose(d_expected, d.numpy())
 
 
+def te_reshape():
+    A = te.placeholder((128, 128), name="A")
+    B = topi.reshape(A, [8, 16, 128])
+    return [A, B]
+
+
+@T.prim_func
+def tir_reshape(
+    A: T.Buffer[(128, 128), "float32"], T_reshape: T.Buffer[(8, 16, 128), "float32"]
+) -> None:
+    T.func_attr({"global_symbol": "main", "tir.noalias": True})
+    for i0, i1, i2 in T.grid(8, 16, 128):
+        with T.block("T_reshape"):
+            ax0, ax1, ax2 = T.axis.remap("SSS", [i0, i1, i2])
+            T.reads(A[ax0 * 16 + ax1, ax2])
+            T.writes(T_reshape[ax0, ax1, ax2])
+            T_reshape[ax0, ax1, ax2] = A[ax0 * 16 + ax1, ax2]
+
+
+def test_reshape():
+    _check_workload(te_reshape, tir_reshape)
+
+
 if __name__ == "__main__":
-    test_unique_name_complete_block()
-    test_unique_name_reduction_block()
-    test_matmul()
-    test_element_wise()
-    test_conv2d()
-    test_multi_output()
-    test_extern()
-    test_arg_order()
-    test_error_reporting()
-    test_constant()
-    test_select_simplify()
-    test_tensor_attr()
-    test_tensor_layout_attr()
-    test_argmax_idx_val()
-    test_argmax_val_idx()
-    test_int64_indices()
-    test_zero_dim_add()
-    test_loop_var_datatype()
-    test_unbound_var()
-    test_argmax()
+    sys.exit(pytest.main([__file__] + sys.argv[1:]))
