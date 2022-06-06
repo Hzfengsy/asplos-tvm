@@ -203,7 +203,8 @@ class CodeGenC : public ExprFunctor<void(const PrimExpr&, std::ostream&)>,
   // Print reference to struct location
   std::string GetStructRef(DataType t, const PrimExpr& buffer, const PrimExpr& index, int kind);
   // Print reference to a buffer as type t in index.
-  virtual std::string GetBufferRef(DataType t, const BufferNode* buffer, PrimExpr index);
+  virtual std::string GetBufferRef(DataType t, const BufferNode* buffer, PrimExpr index,
+                                   bool cached_address = false);
 
   /*!
    * \brief Handle volatile loads.
@@ -267,6 +268,8 @@ class CodeGenC : public ExprFunctor<void(const PrimExpr&, std::ostream&)>,
   std::unordered_map<const VarNode*, DataType> handle_data_type_;
   /*! \brief Record of ops that have pre-defined global symbol. */
   OpAttrMap<TGlobalSymbol> op_attr_global_symbol_ = Op::GetAttrMap<TGlobalSymbol>("TGlobalSymbol");
+  // Buffers used for address calculation optimization
+  std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual> cached_address_;
   // cache commonly used ops
   const Op& builtin_call_extern_ = builtin::call_extern();
   const Op& builtin_call_pure_extern_ = builtin::call_pure_extern();

@@ -159,7 +159,8 @@ void CodeGenC::PrintSSAAssign(const std::string& target, const std::string& src,
 }
 
 // Print a reference expression to a buffer.
-std::string CodeGenC::GetBufferRef(DataType t, const BufferNode* buffer, PrimExpr index) {
+std::string CodeGenC::GetBufferRef(DataType t, const BufferNode* buffer, PrimExpr index,
+                                   bool cached_address) {
   const VarNode* buffer_var = buffer->data.get();
   std::ostringstream os;
   std::string vid = GetVarID(buffer_var);
@@ -187,6 +188,7 @@ std::string CodeGenC::GetBufferRef(DataType t, const BufferNode* buffer, PrimExp
 
   std::string buffer_str = vid;
   if (!HandleTypeMatch(buffer_var, buffer_element_dtype) || is_vol) {
+    ICHECK(!cached_address);
     std::stringstream temp;
     temp << "(" << ptr_cast(buffer_element_dtype) << vid << ")";
     buffer_str = temp.str();
@@ -201,14 +203,22 @@ std::string CodeGenC::GetBufferRef(DataType t, const BufferNode* buffer, PrimExp
     // int32.  Therefore, we need to divide by the ratio of their
     // sizes in that case.
     int div_factor = (t.lanes() == 1) ? (32 / t.bits()) : t.lanes();
-
+    ICHECK(!cached_address);
     os << "*("
        << "(" << ptr_cast(t) << vid << ")"
        << " + " << index_str << " / " << div_factor << ")";
   } else if (t == buffer_element_dtype) {
-    os << buffer_str << "[" << index_str << "]";
+    if (!cached_address) {
+      os << buffer_str << "[" << index_str << "]";
+    } else {
+      os << "*" << index_str;
+    }
   } else {
-    os << "*" << ptr_cast(t) << "(" << buffer_str << " + " << index_str << ")";
+    if (!cached_address) {
+      os << "*" << ptr_cast(t) << "(" << buffer_str << " + " << index_str << ")";
+    } else {
+      os << "*" << ptr_cast(t) << "(" << index_str << ")";
+    }
   }
 
   return os.str();
@@ -673,6 +683,29 @@ void CodeGenC::VisitExpr_(const BufferLoadNode* op, std::ostream& os) {  // NOLI
   Var buffer_var = op->buffer->data;
   DataType element_dtype = op->buffer->dtype;
 
+  // addr[0]
+  if (cached_address_.count(op->buffer->data)) {
+    os << GetVarID(buffer_var.get());
+    return;
+  }
+  // data[addr[0]]
+  if (const BufferLoadNode* load = index.as<BufferLoadNode>()) {
+    if (cached_address_.count(load->buffer->data)) {
+      os << GetBufferRef(op->dtype, op->buffer.get(), load->buffer->data, true);
+      return;
+    }
+  }
+  // data[ramp(addr[0], 1, lanes)]
+  if (const RampNode* ramp = index.as<RampNode>()) {
+    if (const BufferLoadNode* load = ramp->base.as<BufferLoadNode>()) {
+      if (cached_address_.count(load->buffer->data)) {
+        ICHECK(is_one(ramp->stride));
+        os << GetBufferRef(op->dtype, op->buffer.get(), load->buffer->data, true);
+        return;
+      }
+    }
+  }
+
   int lanes = op->dtype.lanes();
   // delcare type.
   if (value_dtype.lanes() == element_dtype.lanes()) {
@@ -735,6 +768,18 @@ void CodeGenC::VisitStmt_(const BufferStoreNode* op) {
   DataType element_dtype = op->buffer->dtype;
   PrimExpr index_expr = op->indices[0];
   Var buffer_var = op->buffer->data;
+
+  if (cached_address_.count(op->buffer->data)) {
+    std::string value = this->PrintExpr(op->value);
+    this->PrintIndent();
+    if (!is_zero(index_expr)) {
+      stream << GetVarID(buffer_var.get()) << " = " << GetVarID(index_expr.as<VarNode>()) << " + "
+             << value << ";\n";
+    } else {
+      stream << GetVarID(buffer_var.get()) << " = " << value << ";\n";
+    }
+    return;
+  }
 
   if (value_dtype.lanes() == element_dtype.lanes()) {
     std::string value = this->PrintExpr(op->value);

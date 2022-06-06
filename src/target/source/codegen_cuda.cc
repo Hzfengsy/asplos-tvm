@@ -24,6 +24,7 @@
 #include "codegen_cuda.h"
 
 #include <tvm/arith/analyzer.h>
+#include <tvm/runtime/data_type.h>
 #include <tvm/runtime/registry.h>
 #include <tvm/tir/index_map.h>
 #include <tvm/tir/stmt_functor.h>
@@ -925,7 +926,22 @@ void CodeGenCUDA::VisitStmt_(const AllocateNode* op) {
   ICHECK(!is_zero(op->condition));
   std::string vid = AllocVarID(op->buffer_var.get());
 
+  auto it = op->annotations.find(tir::attr::cached_address);
+  if (it != op->annotations.end()) {
+    cached_address_.insert(op->buffer_var);
+    this->PrintIndent();
+    std::string scope = GetPtrStorageScope(op->buffer_var);
+    ICHECK(scope == "local");
+    DLDataType dtype =
+        runtime::String2DLDataType(std::string(Downcast<runtime::String>((*it).second)));
+    PrintType(DataType(dtype), stream);
+    stream << "* " << vid << ";\n";
+    this->PrintStmt(op->body);
+    return;
+  }
+
   this->PrintIndent();
+
   std::string scope = GetPtrStorageScope(op->buffer_var);
   const VarNode* buffer = op->buffer_var.as<VarNode>();
   if (scope.find("wmma.") == 0) {

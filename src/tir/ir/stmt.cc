@@ -424,6 +424,10 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
         p->Print(op->extents[i]);
       }
       p->stream << "], storage_scope = " << ptr_type->storage_scope;
+      if (!op->annotations.empty()) {
+        p->stream << "], annotations = ";
+        p->Print(op->annotations); 
+      }
       if (!is_one(op->condition)) {
         p->stream << " if ";
         p->Print(op->condition);

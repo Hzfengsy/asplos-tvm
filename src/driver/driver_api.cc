@@ -310,6 +310,7 @@ Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   pass_list.push_back(
       tir::transform::CommonSubexprElimTIR(!disable_cse_tir, enable_equiv_terms_in_cse_tir));
 
+  pass_list.push_back(tir::transform::OptimizePredicatedLoad(true));
   return pass_list;
 }
 
@@ -446,9 +447,7 @@ std::pair<IRModule, IRModule> SplitMixedModule(IRModule mod_mixed, const Target&
   mod_mixed = ApplyPasses(mod_mixed, MixedModulePassManager(mod_mixed, target));
 
   IRModule host_mod = ApplyPasses(mod_mixed, HostModulePassManager(mod_mixed, target_host));
-
   IRModule device_mod = ApplyPasses(mod_mixed, DeviceModulePassManager(mod_mixed, target));
-
   auto keys = target->GetKeys();
 
   CheckAndUpdateHostConsistency(&target, &target_host);
@@ -469,7 +468,6 @@ runtime::Module TIRToRuntime(const Map<Target, IRModule>& inputs_arg,
   std::vector<runtime::Module> device_modules;
   Map<Target, IRModule> inputs = inputs_arg;
   Target target_host = target_host_arg;
-
   // Fetch previous defined target host in targets
   CheckAndUpdateHostConsistency(&inputs, &target_host);
 
@@ -503,7 +501,6 @@ runtime::Module TIRToRuntime(const Map<Target, IRModule>& inputs_arg,
       auto pair = SplitMixedModule(ir_module, target, target_host);
       auto& host_mod = pair.first;
       auto& device_mod = pair.second;
-
       ICHECK(host_mod.defined()) << "The split host module must be defined";
 
       ICHECK(mhost_all.defined()) << "The host module must be defined";

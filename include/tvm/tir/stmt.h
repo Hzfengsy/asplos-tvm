@@ -159,6 +159,7 @@ class AttrStmt : public Stmt {
   TVM_DLL AttrStmt(ObjectRef node, String attr_key, PrimExpr value, Stmt body, Span span = Span());
 
   TVM_DEFINE_OBJECT_REF_METHODS(AttrStmt, Stmt, AttrStmtNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(AttrStmtNode);
 };
 
 /*!
@@ -1550,6 +1551,9 @@ constexpr const char* local_stage = "local_stage";
 
 /*! \brief Mark vectorization length constraint on block */
 constexpr const char* vector_bytes = "vector_bytes";
+
+/*! \brief Mark the buffer as cache for buffer load address */
+constexpr const char* cached_address = "cached_address";
 
 /*!
  * \brief Check if attr_key is a pragma key extension
