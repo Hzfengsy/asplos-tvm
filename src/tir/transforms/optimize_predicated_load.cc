@@ -180,18 +180,19 @@ class LetVarBindingCanonicalizer : public ExprMutator {
       : var_range_(var_range) {}
 
   bool Canonicalize(const Var& top_var, const PrimExpr& binding) {
-    top_let_var_[binding] = top_var;
-    PrimExpr res = this->VisitExpr(binding);
+    PrimExpr res = this->VisitExpr(Substitute(binding, replace_map));
     if (fail) return false;
 
     const SumFormNode* ret = res.as<SumFormNode>();
-    ICHECK(ret != nullptr);
+    if (ret == nullptr) return false;
     ICHECK_EQ(ret->vars.size(), 1);
     if (!is_one(ret->scales[0]) || !is_zero(ret->base)) {
       let_var_buffer_map[top_var] =
           decl_buffer({int32(1)}, DataType::Int(32), top_var->name_hint, "local");
       BuildAttachMap(top_var, ret->vars[0], Attach::AttachType::kAddition, ret->scales[0],
                      ret->base);
+    } else {
+      replace_map[top_var] = ret->vars[0];
     }
     return true;
   }
@@ -199,6 +200,7 @@ class LetVarBindingCanonicalizer : public ExprMutator {
   std::unordered_map<Var, std::vector<Attach>, ObjectPtrHash, ObjectPtrEqual> inv_attach_map;
   std::unordered_map<Var, Buffer, ObjectPtrHash, ObjectPtrEqual> let_var_buffer_map;
   std::unordered_map<Var, Attach, ObjectPtrHash, ObjectPtrEqual> attach_map;
+  std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> replace_map;
 
  private:
   void BuildAttachMap(const Var& cur_var, const Var& dependent_var, Attach::AttachType type,
@@ -250,6 +252,7 @@ class LetVarBindingCanonicalizer : public ExprMutator {
     if (a != nullptr && b != nullptr) {
       ICHECK(a->vars.size() <= 1 && b->vars.size() <= 1);
       if (b->vars.size() == 0) {
+        if (a->vars.size() == 0) return SumForm({}, {}, int32(0));
         // define let var for a
         Var inner;
         if (is_one(a->scales[0]) && is_zero(a->base)) {
@@ -268,12 +271,9 @@ class LetVarBindingCanonicalizer : public ExprMutator {
             SearchExisitingAttach(inner, Attach::AttachType::kFloordiv, b->base);
         Optional<Var> var_mod =
             SearchExisitingAttach(inner, Attach::AttachType::kFloormod, b->base);
-        // introduce new intermediate vars if doesn't exsit now
+        // introduce new intermediate vars if doesn't exist now
         if (!var_div.defined()) {
-          auto it = top_let_var_.find(GetRef<FloorDiv>(op));
-          var_div = it == top_let_var_.end()
-                        ? inner.copy_with_suffix("_div_" + std::to_string(b->base->value))
-                        : it->second;
+          var_div = inner.copy_with_suffix("_div_" + std::to_string(b->base->value));
           let_var_buffer_map[var_div.value()] =
               decl_buffer({int32(1)}, DataType::Int(32), var_div.value()->name_hint, "local");
           BuildAttachMap(var_div.value(), inner, Attach::AttachType::kFloordiv, b->base, int32(0));
@@ -299,6 +299,7 @@ class LetVarBindingCanonicalizer : public ExprMutator {
     if (a != nullptr && b != nullptr) {
       ICHECK(a->vars.size() <= 1 && b->vars.size() <= 1);
       if (b->vars.size() == 0) {
+        if (a->vars.size() == 0) return SumForm({}, {}, int32(0));
         // define let var for a
         Var inner;
         if (is_one(a->scales[0]) && is_zero(a->base)) {
@@ -315,12 +316,9 @@ class LetVarBindingCanonicalizer : public ExprMutator {
         // first search for existing vars
         Optional<Var> var_mod =
             SearchExisitingAttach(inner, Attach::AttachType::kFloormod, b->base);
-        // introduce new intermediate var if doesn't exsits now
+        // introduce new intermediate var if doesn't exist now
         if (!var_mod.defined()) {
-          auto it = top_let_var_.find(GetRef<FloorMod>(op));
-          var_mod = it == top_let_var_.end()
-                        ? inner.copy_with_suffix("_mod_" + std::to_string(b->base->value))
-                        : it->second;
+          var_mod = inner.copy_with_suffix("_mod_" + std::to_string(b->base->value));
           let_var_buffer_map[var_mod.value()] =
               decl_buffer({int32(1)}, DataType::Int(32), var_mod.value()->name_hint, "local");
           BuildAttachMap(var_mod.value(), inner, Attach::AttachType::kFloormod, b->base, int32(0));
@@ -382,7 +380,6 @@ class LetVarBindingCanonicalizer : public ExprMutator {
   }
 
   bool fail{false};
-  std::unordered_map<PrimExpr, Var, ObjectPtrHash, ObjectPtrEqual> top_let_var_;
 
   std::unordered_map<Var, arith::IntSet, ObjectPtrHash, ObjectPtrEqual>* var_range_;
 };
@@ -710,8 +707,10 @@ class PredicatePrecompute : public StmtMutator {
     LoadAddressLinearizer linearizer(&var_range_);
     if (!MatchLetVars(&canonicalizer)) return GetRef<BufferStore>(store);
     local_predicate_map_.clear();
+    // Replace the buffer store
+    BufferStore replaced_store = Downcast<BufferStore>(Substitute(GetRef<BufferStore>(store), canonicalizer.replace_map));
     // Check the pattern of load address and predicate
-    const CallNode* call = store->value.as<CallNode>();
+    const CallNode* call = replaced_store->value.as<CallNode>();
     if (call != nullptr) {
       const OpNode* op = call->op.as<OpNode>();
       if (op != nullptr && op->name == "tir.if_then_else") {
@@ -853,9 +852,9 @@ class PredicatePrecompute : public StmtMutator {
             new_lhs = BufferLoad(load->buffer, {BufferLoad(buffer, {int32(0)})});
           }
           return BufferStore(
-              store->buffer,
-              if_then_else(cast(DataType::Bool(1), new_predicate), new_lhs, rhs, store->span),
-              store->indices);
+              replaced_store->buffer,
+              if_then_else(cast(DataType::Bool(1), new_predicate), new_lhs, rhs, replaced_store->span),
+              replaced_store->indices);
         }
       }
     }
