@@ -200,6 +200,7 @@ class LetVarBindingCanonicalizer : public ExprMutator {
   std::unordered_map<Var, std::vector<Attach>, ObjectPtrHash, ObjectPtrEqual> inv_attach_map;
   std::unordered_map<Var, Buffer, ObjectPtrHash, ObjectPtrEqual> let_var_buffer_map;
   std::unordered_map<Var, Attach, ObjectPtrHash, ObjectPtrEqual> attach_map;
+  std::unordered_map<Var, std::vector<Attach>, ObjectPtrHash, ObjectPtrEqual> loop_attach_map;
   std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> replace_map;
 
  private:
@@ -210,8 +211,10 @@ class LetVarBindingCanonicalizer : public ExprMutator {
     auto it = attach_map.find(dependent_var);
     if (it == attach_map.end()) {
       attach = Attach(dependent_var, cur_var, dependent_var, type, c1, c2);
+      loop_attach_map[dependent_var].push_back(attach);
     } else {
       attach = Attach(it->second.attach_loop, cur_var, dependent_var, type, c1, c2);
+      loop_attach_map[it->second.attach_loop].push_back(attach);
     }
     inv_attach_map[dependent_var].push_back(attach);
     attach_map[cur_var] = attach;
@@ -484,10 +487,11 @@ class LoadAddressLinearizer : public ExprMutator {
 
 class PredicatePrecompute : public StmtMutator {
  public:
+  explicit PredicatePrecompute() : canonicalizer_(&var_range_) {}
+
   Stmt VisitStmt_(const LetStmtNode* op) final {
-    let_stmt_stack_.push_back(GetRef<LetStmt>(op));
+    if (!canonicalizer_.Canonicalize(op->var, op->value)) return GetRef<LetStmt>(op);
     Stmt result = StmtMutator::VisitStmt_(op);
-    let_stmt_stack_.pop_back();
     return result;
   }
 
@@ -497,8 +501,8 @@ class PredicatePrecompute : public StmtMutator {
     For result = Downcast<For>(StmtMutator::VisitStmt_(op));
     // Handle attach map
     auto* new_for = result.CopyOnWrite();
-    auto it = attach_map_.find(op->loop_var);
-    if (it != attach_map_.end()) {
+    auto it = canonicalizer_.loop_attach_map.find(op->loop_var);
+    if (it != canonicalizer_.loop_attach_map.end()) {
       // append index update stmts inside the loop
       new_for->body =
           AppendStmt(new_for->body, AttachUpdateStmt(op->loop_var, int32(1), it->second));
@@ -528,11 +532,11 @@ class PredicatePrecompute : public StmtMutator {
     if (!pre_computed) {
       // append the initialization of addr buffer
       std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> replace;
-      for (const auto it : let_var_buffer_map_) {
+      for (const auto it : canonicalizer_.let_var_buffer_map) {
         replace[it.first] = Load(it.first);
       }
       for (const auto it : var_range_) {
-        if (!let_var_buffer_map_.count(it.first)) {
+        if (!canonicalizer_.let_var_buffer_map.count(it.first)) {
           replace[it.first] = it.second.min();
         }
       }
@@ -542,7 +546,7 @@ class PredicatePrecompute : public StmtMutator {
             result_ptr->body);
       }
       // append the initilziation of index buffers
-      for (const auto it : attach_map_) {
+      for (const auto it : canonicalizer_.loop_attach_map) {
         const std::vector<Attach>& attaches = it.second;
         std::unordered_map<Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> init_map;
         for (const Attach& attach : attaches) {
@@ -559,7 +563,6 @@ class PredicatePrecompute : public StmtMutator {
           result_ptr->body = AppendStmt(Store(attach.cur_var, value), result_ptr->body);
         }
       }
-      attach_map_.clear();
       for (const auto it : predicate_map_) {
         result_ptr->body = AppendStmt(it.second, result_ptr->body);
       }
@@ -576,7 +579,7 @@ class PredicatePrecompute : public StmtMutator {
     for (const auto it : predicate_map_) {
       result = Allocate(it.first->data, it.first->dtype, it.first->shape, Bool(true), result);
     }
-    for (const auto it : let_var_buffer_map_) {
+    for (const auto it : canonicalizer_.let_var_buffer_map) {
       result = Allocate(it.second->data, it.second->dtype, it.second->shape, Bool(true), result);
     }
     for (const auto it : addr_map_) {
@@ -585,15 +588,15 @@ class PredicatePrecompute : public StmtMutator {
           {{attr::cached_address, runtime::String(DLDataType2String(it.second.second->dtype))}});
     }
     predicate_map_.clear();
-    let_var_buffer_map_.clear();
+    canonicalizer_.let_var_buffer_map.clear();
     addr_map_.clear();
     return result;
   }
 
  private:
   PrimExpr Load(const Var& var) {
-    const auto it = let_var_buffer_map_.find(var);
-    if (it == let_var_buffer_map_.end()) {
+    const auto it = canonicalizer_.let_var_buffer_map.find(var);
+    if (it == canonicalizer_.let_var_buffer_map.end()) {
       return var;
     } else {
       return BufferLoad(it->second, {int32(0)});
@@ -601,8 +604,8 @@ class PredicatePrecompute : public StmtMutator {
   }
 
   Stmt Store(const Var& var, const PrimExpr& value) {
-    const auto it = let_var_buffer_map_.find(var);
-    ICHECK(it != let_var_buffer_map_.end());
+    const auto it = canonicalizer_.let_var_buffer_map.find(var);
+    ICHECK(it != canonicalizer_.let_var_buffer_map.end());
     return BufferStore(it->second, value, {int32(0)});
   }
 
@@ -627,8 +630,9 @@ class PredicatePrecompute : public StmtMutator {
       if (attach.dependent_var.same_as(dependent_var)) {
         if (attach.type == Attach::AttachType::kAddition) {
           IntImm delta = Downcast<IntImm>(inc * attach.c1);
-          result.push_back(Store(attach.cur_var, Load(attach.cur_var) + delta));
-          result.push_back(AttachUpdateStmt(attach.cur_var, delta, attaches));
+          // result.push_back(Store(attach.cur_var, Load(attach.cur_var) + delta));
+          AppendVarUpdate(&result, attach.cur_var, delta, attaches);
+          // result.push_back(AttachUpdateStmt(attach.cur_var, delta, attaches));
         } else if (attach.type == Attach::AttachType::kFloormod) {
           // Search for conjugate div attach
           size_t j;
@@ -679,15 +683,6 @@ class PredicatePrecompute : public StmtMutator {
     return SeqStmt::Flatten(result);
   }
 
-  bool MatchLetVars(LetVarBindingCanonicalizer* canonicalizer) {
-    for (const LetStmt& let : let_stmt_stack_) {
-      if (!canonicalizer->Canonicalize(let->var, let->value)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   void SplitPredicate(PrimExpr predicate, std::vector<PrimExpr>* sub_predicates) {
     arith::PVar<PrimExpr> sub_predicate, rest;
     for (;;) {
@@ -703,12 +698,11 @@ class PredicatePrecompute : public StmtMutator {
 
   BufferStore TransformPredicateLoad(const BufferStoreNode* store) {
     // Canonicalize the let var bindings
-    LetVarBindingCanonicalizer canonicalizer(&var_range_);
     LoadAddressLinearizer linearizer(&var_range_);
-    if (!MatchLetVars(&canonicalizer)) return GetRef<BufferStore>(store);
     local_predicate_map_.clear();
     // Replace the buffer store
-    BufferStore replaced_store = Downcast<BufferStore>(Substitute(GetRef<BufferStore>(store), canonicalizer.replace_map));
+    BufferStore replaced_store =
+        Downcast<BufferStore>(Substitute(GetRef<BufferStore>(store), canonicalizer_.replace_map));
     // Check the pattern of load address and predicate
     const CallNode* call = replaced_store->value.as<CallNode>();
     if (call != nullptr) {
@@ -736,9 +730,6 @@ class PredicatePrecompute : public StmtMutator {
           // split predicates into sub predicates
           std::vector<PrimExpr> sub_predicates, new_sub_predicates;
           SplitPredicate(predicate, &sub_predicates);
-          // Note down let var buffer map
-          let_var_buffer_map_.insert(canonicalizer.let_var_buffer_map.begin(),
-                                     canonicalizer.let_var_buffer_map.end());
           // parameterize sub-predicates
           for (const PrimExpr& sub_predicate : sub_predicates) {
             std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual> covered;
@@ -825,10 +816,6 @@ class PredicatePrecompute : public StmtMutator {
             // fail case
             return GetRef<BufferStore>(store);
           }
-          // Note down attach map
-          for (const auto it : canonicalizer.attach_map) {
-            attach_map_[it.second.attach_loop].push_back(it.second);
-          }
           // Note down predicate buffers
           predicate_map_.insert(local_predicate_map_.begin(), local_predicate_map_.end());
           // Make new predicate
@@ -851,10 +838,10 @@ class PredicatePrecompute : public StmtMutator {
           } else {
             new_lhs = BufferLoad(load->buffer, {BufferLoad(buffer, {int32(0)})});
           }
-          return BufferStore(
-              replaced_store->buffer,
-              if_then_else(cast(DataType::Bool(1), new_predicate), new_lhs, rhs, replaced_store->span),
-              replaced_store->indices);
+          return BufferStore(replaced_store->buffer,
+                             if_then_else(cast(DataType::Bool(1), new_predicate), new_lhs, rhs,
+                                          replaced_store->span),
+                             replaced_store->indices);
         }
       }
     }
@@ -871,12 +858,9 @@ class PredicatePrecompute : public StmtMutator {
   }
 
   arith::Analyzer analyzer_;
-  std::vector<LetStmt> let_stmt_stack_;
   bool pre_computed{false};
-  std::unordered_map<Var, Buffer, ObjectPtrHash, ObjectPtrEqual> let_var_buffer_map_;
   std::unordered_map<Var, arith::IntSet, ObjectPtrHash, ObjectPtrEqual> var_range_;
-
-  std::unordered_map<Var, std::vector<Attach>, ObjectPtrHash, ObjectPtrEqual> attach_map_;
+  LetVarBindingCanonicalizer canonicalizer_;
 
   std::unordered_map<Buffer, std::pair<PrimExpr, Buffer>, ObjectPtrHash, ObjectPtrEqual> addr_map_;
   std::unordered_map<Var, std::vector<std::pair<Buffer, IntImm>>, ObjectPtrHash, ObjectPtrEqual>
