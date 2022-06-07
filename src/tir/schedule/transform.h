@@ -56,15 +56,6 @@ Block WithAnnotation(const BlockNode* block, const String& attr_key, const Objec
 Buffer WithScope(const Buffer& buffer, const String& scope);
 
 /*!
- * \brief Create a new buffer by change the shape with block iters
- * \param buffer The given buffer.
- * \param block_iters The block iters.
- * \return The new buffer with target shape.
- */
-Buffer WithBlockIters(const Buffer& buffer, const Array<IterVar>& block_iters,
-                      const std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual>& convered);
-
-/*!
  * \brief Replaces the buffer within the specific sequence of regions
  * \param regions The regions whose buffers are to be replaced
  * \param source The buffer to be replaced
