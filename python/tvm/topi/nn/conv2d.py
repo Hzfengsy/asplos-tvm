@@ -321,6 +321,7 @@ def conv2d_nhwc(
         dilation,
         1,
         "NHWC",
+        "HWIO",
         out_dtype,
         auto_scheduler_rewritten_layout,
         auto_scheduler_should_rewrite_layout=True,
@@ -713,7 +714,8 @@ def conv(
     padding: Union[int, Sequence[int]],
     dilation: Union[int, Sequence[int]],
     groups: int,
-    order: str,
+    data_layout: str,
+    kernel_layout: str = "",
     out_dtype: Union[str, None] = None,
     auto_scheduler_rewritten_layout: Optional[str] = None,
     auto_scheduler_should_rewrite_layout: bool = False,
@@ -747,10 +749,15 @@ def conv(
     groups : int
         number of groups
 
-    order : str
-        Ordering of dimensions. N indicates batch dimension, C indicates
+    data_layout : str
+        Layout of the input. N indicates batch dimension, C indicates
         channels, any other character indicates HW (or H or HWD for 1D and 3D).
 
+    kernel_layout: Optional[str]
+        Layout of the filter. I indicates input channels, O indicates output channels,
+        any other character indicates HW dimension of the filter (or H or HWD for 1D and 3D).
+        If kernel_layout is empty, use data_layout to infer the default kernel_layout
+        
     out_dtype : str
         Elements are converted to this type before elementwise multiplication
         and summation.
@@ -793,13 +800,16 @@ def conv(
     permutation_from_reductions = permutation_from[1:].copy()
     permutation_from_reductions[permutation_from_reductions > permutation_from[0]] -= 1
 
-    # kernel permutation, if C appears before HW then num_filter is first, otherwise it is last
-    # tkonolige: I don't really understand kernel ordering for NHWC, it seems
-    # like num_filters should match the N dimension
-    if order.find("C") < re.search("[^NC]", order).span()[0]:
-        permutation_to_kernel = [0, 1] + list(range(2, dim + 2))
+    if kernel_layout == "":
+        # kernel permutation, if C appears before HW then num_filter is first, otherwise it is last
+        # tkonolige: I don't really understand kernel ordering for NHWC, it seems
+        # like num_filters should match the N dimension
+        if order.find("C") < re.search("[^NC]", order).span()[0]:
+            permutation_to_kernel = [0, 1] + list(range(2, dim + 2))
+        else:
+            permutation_to_kernel = [dim + 1, dim] + list(range(dim))
     else:
-        permutation_to_kernel = [dim + 1, dim] + list(range(dim))
+        permutation_to_kernel = [kernel_layout.find('O'), kernel_layout.find('I')] + [x.span()[0] for x in re.finditer("[^OI]", kernel_layout)]
     permutation_from_kernel = np.argsort(permutation_to_kernel)
 
     batch, in_channel, *dimensions = np.array(get_const_tuple(inp.shape))[permutation_to].tolist()
