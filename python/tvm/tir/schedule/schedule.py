@@ -2639,109 +2639,14 @@ class Schedule(Object):
             self, block, buffer_index, buffer_index_type_enum, axis_separators
         )
 
-    @type_checked
-    def transform_block_layout(
+    def padding_einsum(
         self,
-        block: BlockRV,
-        index_map: Union[IndexMap, Callable],
-    ) -> None:
-        """Apply a transformation represented by IndexMap to block
-
-        Parameters
-        ----------
-        block_rv : BlockRV
-            The block to be transformeed
-        index_map : Union[IndexMap, Callable]
-            The transformation to apply
-
-        Examples
-        --------
-        """
-        if callable(index_map):
-            index_map = IndexMap.from_func(index_map)
-        _ffi_api.ScheduleTransformBlockLayout(  # type: ignore # pylint: disable=no-member
-            self, block, index_map
+        block,
+        padding,
+    ):
+        _ffi_api.SchedulePaddingEinSum(
+            self, block, padding
         )
-
-    @type_checked
-    def set_axis_separator(
-        self,
-        block: BlockRV,
-        buffer_index: int,
-        buffer_index_type: str,
-        axis_separators: Optional[List[int]],
-    ) -> None:
-        """Set the axis separator of a buffer, where the buffer is specified by a block and a read
-        or write index.
-
-        Parameters
-        ----------
-        block : BlockRV
-            The block that accesses the target buffer
-        buffer_index: int
-            The index of the buffer in block's read or write region
-        buffer_index_type : str
-            Type of the buffer index, "read" or "write"
-        axis_separators : Optional[List[int]]
-            The axis separators.
-
-        Examples
-        --------
-
-        Before set_axis_separator, in TensorIR, the IR is:
-
-        .. code-block:: python
-
-            @T.prim_func
-            def before_set_axis_separator(
-                A: T.Buffer[(128, 128), "float32"], C: T.Buffer[(128, 128), "float32"]
-            ) -> None:
-                B = T.alloc_buffer((128, 128), dtype="float32")
-
-                for i, j in T.grid(128, 128):
-                    with T.block("B"):
-                        vi, vj = T.axis.remap("SS", [i, j])
-                        B[vi, vj] = A[vi, vj] * 2.0
-                for i, j in T.grid(128, 128):
-                    with T.block("C"):
-                        vi, vj = T.axis.remap("SS", [i, j])
-                        C[vi, vj] = B[vi, vj] + 1.0
-
-        Create the schedule and do set_axis_separator:
-
-        .. code-block:: python
-
-            sch = tir.Schedule(before_set_axis_separator)
-            sch.set_axis_separators(sch.get_block("B"), buffer_index=0, buffer_index_type="write",
-                                    axis_separators=[1])
-            print(sch.mod["main"].script())
-
-        After applying set_axis_separator, the IR becomes:
-
-        .. code-block:: python
-
-            @T.prim_func
-            def after_set_axis_separators(
-                A: T.Buffer[(128, 128), "float32"], C: T.Buffer[(128, 128), "float32"]
-            ) -> None:
-                B = T.alloc_buffer([128, 128], dtype="float32", axis_separators=[1])
-
-                for i, j in T.grid(128, 128):
-                    with T.block("B"):
-                        vi, vj = T.axis.remap("SS", [i, j])
-                        B[vi, vj] = A[vi, vj] * T.float32(2)
-                for i, j in T.grid(128, 128):
-                    with T.block("C"):
-                        vi, vj = T.axis.remap("SS", [i, j])
-                        C[vi, vj] = B[vi, vj] + T.float32(1)
-        """
-        axis_separators = axis_separators or []
-        assert buffer_index_type in ["read", "write"], "Invalid buffer_index_type"
-        buffer_index_type_enum = 0 if buffer_index_type == "read" else 1
-        _ffi_api.ScheduleSetAxisSeparator(  # type: ignore # pylint: disable=no-member
-            self, block, buffer_index, buffer_index_type_enum, axis_separators
-        )
-
     ########## Schedule: Misc ##########
 
     @type_checked

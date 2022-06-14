@@ -2510,6 +2510,9 @@ Optional<TensorizeInfo> GetTensorizeLoopMapping(const tir::ScheduleState& self,
   //     for k:
   //       C[i, j] += A[i, k] * B[k, j]
 
+  bool paddable = true;
+  std::unordered_map<int, int> padding;
+
   int next_block_ind = block_loops.size() - 1;
   for (int i_desc = n_desc_vars - 1; i_desc >= 0; --i_desc) {
     // Step 3.1. Find the corresponding loop of the i_desc-th block var of desc
@@ -2541,7 +2544,6 @@ Optional<TensorizeInfo> GetTensorizeLoopMapping(const tir::ScheduleState& self,
         break;
       }
     }
-
     if (!block_bind.defined()) return NullOpt;
 
     // Step 3.3. Find the corresponding loop of the target block
@@ -2556,17 +2558,41 @@ Optional<TensorizeInfo> GetTensorizeLoopMapping(const tir::ScheduleState& self,
       if (UsesVar(residual,
                   [&block_loop_vars](const VarNode* var) { return block_loop_vars.count(var); }))
         continue;
+      // We only pad block_ibnd = block_loops[i]
+      if (!is_zero(residual)) {
+        paddable = false;
+      }
 
       const IntImmNode* int_block_extent = block_loops[i]->extent.as<IntImmNode>();
 
       // Check divisibility
-      if (!int_block_extent || int_block_extent->value % int_desc_extent->value != 0) {
+      if (int_block_extent) {
+        if (int_block_extent->value % int_desc_extent->value != 0) {
+         padding[next_block_ind + 1] = (int_block_extent->value + int_desc_extent->value - 1) / int_desc_extent->value * int_desc_extent->value;
+        }
+      } else {
         return NullOpt;
       }
 
       ret->loop_map.Set(block_loop_sref, GetRef<tir::For>(desc_loop));
       break;
     }
+  }
+
+  if (!padding.empty()) {
+    if (!paddable) return NullOpt;
+    std::vector<IntImm> final_padding;
+    for (size_t i = 0; i < block->block->iter_vars.size(); ++i) {
+      const IterVar& iter = block->block->iter_vars[i];
+      auto it = padding.find(i);
+      if (it != padding.end()) {
+        final_padding.push_back(IntImm(iter->dom->extent.dtype(), it->second));
+      } else {
+        const IntImmNode* extent = iter->dom->extent.as<IntImmNode>();
+        final_padding.push_back(GetRef<IntImm>(extent));
+      }
+    }
+    ret->padding = std::move(final_padding);
   }
 
   for (int i = 0, n = desc_loops.size(); i < n; ++i) {

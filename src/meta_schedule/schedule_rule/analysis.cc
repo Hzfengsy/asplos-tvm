@@ -41,6 +41,10 @@ Optional<LoopRV> TilingwithTensorIntrin(const Schedule& sch, const BlockRV& bloc
       sch->state(), sch->GetSRef(block_rv), tir::TensorIntrin::Get(intrin_name)->desc);
   if (!opt_tensorize_info) return NullOpt;
   const tir::TensorizeInfoNode* info = opt_tensorize_info.value().get();
+  // Padding if needed
+  if (info->padding.defined()) {
+    sch->PaddingEinSum(block_rv, info->padding.value());
+  }
   // Construct a mapping from tir loops back to LoopRVs
   Map<tir::StmtSRef, LoopRV> loop2rv;
   {

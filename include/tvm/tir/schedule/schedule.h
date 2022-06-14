@@ -596,6 +596,8 @@ class ScheduleNode : public runtime::Object {
   virtual void SetAxisSeparator(const BlockRV& block_rv, int buffer_index,
                                 BufferIndexType buffer_index_type,
                                 const Array<IntImm>& axis_separators) = 0;
+  
+  virtual void PaddingEinSum(const BlockRV& block_rv, const Array<IntImm>& padding) = 0;
 
   /******** Schedule: Misc ********/
   /*! \brief A no-op that marks the start of postprocessing phase of scheduling */

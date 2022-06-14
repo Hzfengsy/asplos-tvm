@@ -523,6 +523,17 @@ void TracedScheduleNode::SetAxisSeparator(const BlockRV& block_rv, int buffer_in
       /*attrs=*/{Integer(buffer_index), Integer(buffer_index_type), axis_separators},
       /*outputs=*/{}));
 }
+
+void TracedScheduleNode::PaddingEinSum(const BlockRV& block_rv, const Array<IntImm>& padding) {
+  ConcreteScheduleNode::PaddingEinSum(block_rv, padding);
+  static const InstructionKind& kind = InstructionKind::Get("PaddingEinSum");
+  trace_->Append(/*inst=*/Instruction(
+      /*kind=*/kind,
+      /*inputs=*/{block_rv},
+      /*attrs=*/{padding},
+      /*outputs=*/{}));
+}
+
 /******** Schedule: Misc ********/
 
 void TracedScheduleNode::EnterPostproc() {

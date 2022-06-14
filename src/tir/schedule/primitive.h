@@ -414,7 +414,7 @@ TVM_DLL void SetScope(ScheduleState self, const StmtSRef& block_sref, int buffer
 /*!
  * \brief Set the axis separator of a buffer, where the buffer is specified by a block and a read
  * or write index
- * \param block_rv The block that accesses the target buffer.
+ * \param block_sref The block that accesses the target buffer.
  * \param buffer_index The index of the buffer in block's read or write region.
  * \param buffer_index_type The type of the buffer index, kRead or kWrite.
  * \param axis_separators The axis separator of the buffer
@@ -434,6 +434,13 @@ TVM_DLL void SetAxisSeparator(ScheduleState self, const StmtSRef& block_sref, in
 TVM_DLL void SetAxisSeparator(ScheduleState self, const StmtSRef& block_sref, int buffer_index,
                               BufferIndexType buffer_index_type,
                               const Array<IntImm>& axis_separators);
+
+/*!
+ * \brief Pad the dim-th dimension of buffer to pad_to, where the buffer is produced by the block
+ * \param block_sref The block that accesses the target buffer.
+ * \param padding The shape after padding
+ */
+TVM_DLL void PaddingEinSum(ScheduleState self, const StmtSRef& block_sref, const Array<IntImm>& padding);
 
 /******** Schedule: Blockize & Tensorize ********/
 

@@ -262,6 +262,8 @@ TVM_REGISTER_GLOBAL("tir.schedule.ScheduleSetAxisSeparator")
       return self->SetAxisSeparator(
           block_rv, buffer_index, static_cast<BufferIndexType>(buffer_index_type), axis_separators);
     });
+TVM_REGISTER_GLOBAL("tir.schedule.SchedulePaddingEinSum")
+    .set_body_method<Schedule>(&ScheduleNode::PaddingEinSum);
 /******** (FFI) Misc ********/
 TVM_REGISTER_GLOBAL("tir.schedule.ScheduleEnterPostproc")
     .set_body_method<Schedule>(&ScheduleNode::EnterPostproc);

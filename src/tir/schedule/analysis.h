@@ -755,10 +755,13 @@ class TensorizeInfoNode : public Object {
   Map<tir::StmtSRef, tir::For> loop_map;
   /*! \brief Maps loops in an intrinsic description to its index, outer to inner */
   Map<tir::For, Integer> desc_loop_indexer;
+  /*! \brief Padding if not divisible */
+  Optional<Array<IntImm>> padding;  
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("loop_map", &loop_map);
     v->Visit("desc_loop_indexer", &desc_loop_indexer);
+    v->Visit("padding", &padding);
   }
 
   static constexpr const char* _type_key = "tir.schedule.TensorizeInfo";

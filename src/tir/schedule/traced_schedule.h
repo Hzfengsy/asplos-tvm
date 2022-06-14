@@ -111,6 +111,7 @@ class TracedScheduleNode : public ConcreteScheduleNode {
   void SetAxisSeparator(const BlockRV& block_rv, int buffer_index,
                         BufferIndexType buffer_index_type,
                         const Array<IntImm>& axis_separators) final;
+  void PaddingEinSum(const BlockRV& block_rv, const Array<IntImm>& padding) final;
   /******** Schedule: Misc ********/
   void EnterPostproc() final;
 };

@@ -720,7 +720,8 @@ void ConcreteScheduleNode::Unannotate(const LoopRV& loop_rv, const String& ann_k
 void ConcreteScheduleNode::Annotate(const BlockRV& block_rv, const String& ann_key,
                                     const ObjectRef& ann_val) {
   TVM_TIR_SCHEDULE_BEGIN();
-  tir::Annotate(state_, this->GetSRef(block_rv), ann_key, this->CheckAndGetAnnotationValue(ann_val));
+  tir::Annotate(state_, this->GetSRef(block_rv), ann_key,
+                this->CheckAndGetAnnotationValue(ann_val));
   this->state_->DebugVerify();
   TVM_TIR_SCHEDULE_END("annotate", this->error_render_level_);
 }
@@ -757,6 +758,13 @@ void ConcreteScheduleNode::SetAxisSeparator(const BlockRV& block_rv, int buffer_
   tir::SetAxisSeparator(state_, this->GetSRef(block_rv), buffer_index, buffer_index_type,
                         axis_separators);
   TVM_TIR_SCHEDULE_END("set-axis-separator", this->error_render_level_);
+  this->state_->DebugVerify();
+}
+
+void ConcreteScheduleNode::PaddingEinSum(const BlockRV& block_rv, const Array<IntImm>& padding) {
+  TVM_TIR_SCHEDULE_BEGIN();
+  tir::PaddingEinSum(state_, this->GetSRef(block_rv), padding);
+  TVM_TIR_SCHEDULE_END("padding", this->error_render_level_);
   this->state_->DebugVerify();
 }
 
