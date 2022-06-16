@@ -574,19 +574,6 @@ class ScheduleNode : public runtime::Object {
    */
   virtual void TransformLayout(const BlockRV& block_rv, int buffer_index,
                                BufferIndexType buffer_index_type, const IndexMap& index_map) = 0;
-  /*!
-   * \brief Apply a transformation represented by IndexMap to block
-   * \details The block signatures and the block body is transformed by the given index_map.
-   * The index_map is required to be affine since we need its inverse mapping
-   * \param self The state of the schedule
-   * \param block_sref The block sref that refers to the block to be transformed
-   * \param affine_index_map The transformation to apply.
-   */
-  virtual void TransformBlockLayout(const BlockRV& block_rv, const IndexMap& index_map) = 0;\
- 
-  virtual void SetAxisSeparator(const BlockRV& block_rv, int buffer_index,
-                       BufferIndexType buffer_index_type,
-                       const Array<IntImm>& axis_separators) = 0;
 
   /*!
    * \brief Apply a transformation represented by IndexMap to block

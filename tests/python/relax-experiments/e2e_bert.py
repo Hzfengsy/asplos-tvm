@@ -264,7 +264,7 @@ def main():
 
     search_config = TuneConfig(
         num_trials_per_iter=64,
-        max_trials_per_task=1000,
+        max_trials_per_task=500,
         max_trials_global=ARGS.num_trials,
         search_strategy_config={
             "population_size": 2048,
@@ -285,7 +285,7 @@ def main():
     memhammer_tasks = []
     other_tasks = []
     for tsk in tasks:
-        if "softmax" in tsk.task_name:
+        if "fused_dense_reshape1_add4_reshape2_transpose_reshape3" in tsk.task_name:
             print(tsk.dispatched[0].script())
         if should_use_memhammer(tsk):
             print(tsk.task_name, "memhammer")
@@ -317,11 +317,11 @@ def main():
         relax_mod = MetaScheduleApplyHistoryBest(database, ARGS.target)(relax_mod)
         executable = relax_build(relax_mod, target=ARGS.target)
 
-    inputs = (
+    inputs = [
         np.random.randint(100, size=ARGS.input_shape, dtype=input_dtype),
         np.random.randint(100, size=ARGS.input_shape, dtype=input_dtype),
         np.random.randint(100, size=ARGS.input_shape, dtype=input_dtype),
-    )
+    ]
 
     if ARGS.rpc_config:
         run_module_via_rpc(

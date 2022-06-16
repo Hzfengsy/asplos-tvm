@@ -309,9 +309,9 @@ Optional<LoopRV> MultiLevelTilingNode::TransformWithTensorIntrin(State& state, c
     buffers[block->writes[i]->buffer] = std::move(std::make_pair(i, false));
   }
   // Reindex buffers and insert reindex stage
-  state.tensor_core_reindex_store = state.sch->ReIndex(block_rv, 0, true);
-  state.tensor_core_reindex_A = state.sch->ReIndex(block_rv, 0, false);
-  state.tensor_core_reindex_B = state.sch->ReIndex(block_rv, 1, false);
+  state.tensor_core_reindex_store = state.sch->ReIndex(block_rv, 0, tir::BufferIndexType::kWrite);
+  state.tensor_core_reindex_A = state.sch->ReIndex(block_rv, 0, tir::BufferIndexType::kRead);
+  state.tensor_core_reindex_B = state.sch->ReIndex(block_rv, 1, tir::BufferIndexType::kRead);
   block_sref = state.sch->GetSRef(state.block_rv);
   block = TVM_SREF_TO_BLOCK(block, block_sref);
 

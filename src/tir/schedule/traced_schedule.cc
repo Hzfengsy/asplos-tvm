@@ -523,29 +523,6 @@ void TracedScheduleNode::SetAxisSeparator(const BlockRV& block_rv, int buffer_in
       /*attrs=*/{Integer(buffer_index), Integer(buffer_index_type), axis_separators},
       /*outputs=*/{}));
 }
-
-void TracedScheduleNode::TransformBlockLayout(const BlockRV& block_rv, const IndexMap& index_map) {
-  ConcreteScheduleNode::TransformBlockLayout(block_rv, index_map);
-  static const InstructionKind& kind = InstructionKind::Get("TransformBlockLayout");
-  trace_->Append(
-      /*inst=*/Instruction(/*kind=*/kind,
-                           /*inputs=*/{block_rv},
-                           /*attrs=*/{index_map},
-                           /*outputs=*/{}));
-}
-
-void TracedScheduleNode::SetAxisSeparator(const BlockRV& block_rv, int buffer_index,
-                                          BufferIndexType buffer_index_type,
-                                          const Array<IntImm>& axis_separators) {
-  ConcreteScheduleNode::SetAxisSeparator(block_rv, buffer_index, buffer_index_type,
-                                         axis_separators);
-  static const InstructionKind& kind = InstructionKind::Get("SetAxisSeparator");
-  trace_->Append(/*inst=*/Instruction(
-      /*kind=*/kind,
-      /*inputs=*/{block_rv},
-      /*attrs=*/{Integer(buffer_index), Integer(buffer_index_type), axis_separators},
-      /*outputs=*/{}));
-}
 /******** Schedule: Misc ********/
 
 void TracedScheduleNode::EnterPostproc() {

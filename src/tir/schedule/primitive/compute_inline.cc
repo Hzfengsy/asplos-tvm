@@ -27,10 +27,9 @@ where the indices on the left are distinct atomic variables,
 and there should be no variables other than the index variables)";
 
 static const char kErrBodyReverseInline[] = R"(The body of the inlined block should be in form of
-    `B[...] = g(i, j, k, A[f(i, j, k, ...)] ...)`,
+   `B[...] = g(i, j, k, A[i, j, k, ...] ...)`,
 where A is the only buffer the block consumes, whose indices are distinct atomic variables,
-and there should be no variables other than the index variables), and f is a bijective affine
-mapping)";
+and there should be no variables other than the index variables)";
 
 class HasInitBlock : public ScheduleError {
 public:
@@ -264,30 +263,85 @@ protected:
    return std::move(tgt_block);
  }
 
-  /*!
-   * \brief Count the number of undefined variables that are not used
-   * as buffer objects.
-   *
-   * This is used to determine whether inlining or reverse inlining is
-   * possible.  The only undefined variables present should be the
-   * load/store indices, or buffer access based on those indices.
-   *
-   * \param stmt The statement in which to count undefined variables
-   */
-  static int GetNumUndefinedNonpointerVars(const Stmt& stmt) {
-    auto undefined_vars = UndefinedVars(stmt, {});
-    // Buffer pointers and the inlined indices are allowed, but no
-    // other variables may appear in the inlined block.
-    int num_nonpointer_vars = 0;
-    for (const auto& var : undefined_vars) {
-      bool is_pointer = var->dtype.is_handle() && var->type_annotation.defined() &&
-                        var->type_annotation.as<PointerTypeNode>();
-      if (!is_pointer) {
-        num_nonpointer_vars++;
-      }
-    }
-    return num_nonpointer_vars;
-  }
+ /*!
+  * \brief Check if the indices are atomic distinct variables and the access is n-dimensional.
+  * If so, set `self->idx_vars_` properly.
+  * \param indices The indices to be extracted
+  * \param expected_ndim The expected ndim of the access
+  * \return A boolean flag indicating if the check is successful
+  */
+ bool UpdateAndCheckIndexVars(const Array<PrimExpr>& indices, int expected_ndim) {
+   int n = indices.size();
+   if (n != expected_ndim) {
+     // Failure: dimension mismatch
+     return false;
+   }
+   std::vector<const VarNode*> result;
+   result.reserve(n);
+   Array<Var> arr;
+   for (const PrimExpr& i : indices) {
+     if (const auto* var = i.as<VarNode>()) {
+       result.push_back(var);
+       arr.push_back(GetRef<Var>(var));
+     } else {
+       // Failure: indexing expression is not a variable
+       return false;
+     }
+   }
+   //LOG(INFO) << "Index vars " << arr;
+   using DistinctSet = std::unordered_set<const VarNode*>;
+   int n_distinct = DistinctSet(result.begin(), result.end()).size();
+   if (n != n_distinct) {
+     // Failure: indexing variables are not distinct
+     return false;
+   }
+   if (idx_vars_.empty()) {
+     idx_vars_ = std::move(result);
+   } else if (!support::ArrayWithSameContent(idx_vars_, result)) {
+     // Failure: indexing variables are not consitent in different BufferLoads
+     return false;
+   }
+   return true;
+ }
+
+ /*!
+  * \brief Set the mapping of index substitution `self->idx_sub_`
+  * \param indices The expressions that the corresponding index variables are replaced to
+  */
+ void SetIndexSubstitution(const Array<PrimExpr>& indices) {
+   //LOG(INFO) << "SetSubst " << indices;
+   ICHECK_EQ(indices.size(), idx_vars_.size());
+   int n = idx_vars_.size();
+   idx_sub_.reserve(n);
+   for (int i = 0; i < n; ++i) {
+     idx_sub_[idx_vars_[i]] = indices[i];
+   }
+ }
+
+ /*!
+  * \brief Count the number of undefined variables that are not used
+  * as buffer objects.
+  *
+  * This is used to determine whether inlining or reverse inlining is
+  * possible.  The only undefined variables present should be the
+  * load/store indices, or buffer access based on those indices.
+  *
+  * \param stmt The statement in which to count undefined variables
+  */
+ static int GetNumUndefinedNonpointerVars(const Stmt& stmt) {
+   auto undefined_vars = UndefinedVars(stmt, {});
+   // Buffer pointers and the inlined indices are allowed, but no
+   // other variables may appear in the inlined block.
+   int num_nonpointer_vars = 0;
+   for (const auto& var : undefined_vars) {
+     bool is_pointer = var->dtype.is_handle() && var->type_annotation.defined() &&
+                       var->type_annotation.as<PointerTypeNode>();
+     if (!is_pointer) {
+       num_nonpointer_vars++;
+     }
+   }
+   return num_nonpointer_vars;
+ }
 
 private:
  /*!
@@ -442,61 +496,10 @@ private:
    return ReplaceInlinedBuffer(std::move(load));
  }
 
-  PrimExpr ReplaceInlinedBuffer(BufferLoad load) {
-    SetIndexSubstitution(load->indices);
-    return Substitute(inlined_store_->value, idx_sub_);
-  }
-
-  /*!
-   * \brief Check if the indices are atomic distinct variables and the access is n-dimensional.
-   * If so, set `self->idx_vars_` properly.
-   * \param indices The indices to be extracted
-   * \param expected_ndim The expected ndim of the access
-   * \return A boolean flag indicating if the check is successful
-   */
-  bool UpdateAndCheckIndexVars(const Array<PrimExpr>& indices, int expected_ndim) {
-    int n = indices.size();
-    if (n != expected_ndim) {
-      // Failure: dimension mismatch
-      return false;
-    }
-    std::vector<const VarNode*> result;
-    result.reserve(n);
-    for (const PrimExpr& i : indices) {
-      if (const auto* var = i.as<VarNode>()) {
-        result.push_back(var);
-      } else {
-        // Failure: indexing expression is not a variable
-        return false;
-      }
-    }
-    using DistinctSet = std::unordered_set<const VarNode*>;
-    int n_distinct = DistinctSet(result.begin(), result.end()).size();
-    if (n != n_distinct) {
-      // Failure: indexing variables are not distinct
-      return false;
-    }
-    if (idx_vars_.empty()) {
-      idx_vars_ = std::move(result);
-    } else if (!support::ArrayWithSameContent(idx_vars_, result)) {
-      // Failure: indexing variables are not consitent in different BufferLoads
-      return false;
-    }
-    return true;
-  }
-
-  /*!
-   * \brief Set the mapping of index substitution `self->idx_sub_`
-   * \param indices The expressions that the corresponding index variables are replaced to
-   */
-  void SetIndexSubstitution(const Array<PrimExpr>& indices) {
-    ICHECK_EQ(indices.size(), idx_vars_.size());
-    int n = idx_vars_.size();
-    idx_sub_.reserve(n);
-    for (int i = 0; i < n; ++i) {
-      idx_sub_[idx_vars_[i]] = indices[i];
-    }
-  }
+ PrimExpr ReplaceInlinedBuffer(BufferLoad load) {
+   SetIndexSubstitution(load->indices);
+   return Substitute(inlined_store_->value, idx_sub_);
+ }
 };
 
 /*!
@@ -531,47 +534,35 @@ public:
                                 const StmtSRef& scope_root_sref)
      : BaseInliner(inlined_buffer, consumer_block, scope_root_sref), consumer_block_(consumer_block) {}
 
-  bool BodyPatternAllowInline(const Block& consumer_block) {
-    if (inlined_store_ == nullptr) {
-      // Failure: block body is not BufferStore
-      return false;
-    }
-    std::vector<const BufferLoadNode*> loads = ExtractBufferLoad(inlined_buffer_, inlined_store_);
-    if (loads.size() == 0) {
-      // Failure: no BufferLoad from the `inlined_buffer_`
-      return false;
-    }
+ bool BodyPatternAllowInline(const Block& consumer_block) {
+   // LOG(INFO) << "RV consumer_block: " << consumer_block;
+   if (inlined_store_ == nullptr) {
+     //LOG(INFO) << "A";
+     // Failure: block body is not BufferStore
+     return false;
+   }
+   std::vector<const BufferLoadNode*> loads = ExtractBufferLoad(inlined_buffer_, inlined_store_);
+   if (loads.size() == 0) {
+     //LOG(INFO) << "B";
+     // Failure: no BufferLoad from the `inlined_buffer_`
+     return false;
+   }
+   int n_vars = GetNumUndefinedNonpointerVars(GetRef<Stmt>(inlined_store_));
 
-    // Collect block iter domains and update the substition map
-    Map<Var, Range> consumer_iter_doms;
-    for (const auto& iter_var : consumer_block->iter_vars) {
-      consumer_iter_doms.Set(iter_var->var, iter_var->dom);
-      // Set default mapping for unit iters
-      if (is_const_int(iter_var->dom->extent, 1) && is_const_int(iter_var->dom->min)) {
-        idx_sub_[iter_var->var.get()] = iter_var->dom->min;
-      }
-    }
-
-    for (const BufferLoadNode* load : loads) {
-      if (!UpdateAndCheckIndexExprs(load->indices)) {
-        return false;
-      }
-    }
-
-    auto res = arith::DetectIterMap(
-        /*indices=*/buffer_load_indices_,
-        /*input_iters=*/consumer_iter_doms,
-        /*predicate=*/true,
-        /*check_level=*/arith::IterMapLevel::Bijective,
-        /*analyzer=*/&analyzer,
-        /*simplify_trivial_iterators=*/false);
-    buffer_load_iter_map_ = res->indices;
-    if (buffer_load_iter_map_.empty()) {
-      // Failure: indices of BufferLoad are not bijective affine
-      return false;
-    }
-    return true;
-  }
+   //LOG(INFO) << "C " << n_vars;
+   //LOG(INFO) << "Store: " << GetRef<Stmt>(inlined_store_);
+   for (const BufferLoadNode* load : loads) {
+     //LOG(INFO) << "Load: " << GetRef<BufferLoad>(load);
+     if (indices_.empty()) {
+       indices_ = load->indices;
+     }
+     // if (!UpdateAndCheckIndexVars(load->indices, n_vars)) {
+     //   // Failure: incorrect of inconsistent index vars
+     //   return false;
+     // }
+   }
+   return true;
+ }
 
 private:
  Block consumer_block_;
@@ -588,23 +579,30 @@ private:
    return ReplaceInlinedBuffer(std::move(store));
  }
 
-  /*!
-   * \brief Apply the inverse of `buffer_load_iter_map_` to producer indices. Update `idx_sub_` with
-   *        the result. It will be later used to transform the BufferStore indices of the producer.
-   * \param producer_indices The BufferStore indices of the producer.
-   */
-  void CreateInverseMapping(const Array<PrimExpr> producer_indices) {
-    auto inverse_iter_map = arith::InverseAffineIterMap(buffer_load_iter_map_, producer_indices);
-    for (const auto& pair : inverse_iter_map) {
-      idx_sub_[pair.first.get()] = pair.second;
-    }
-  }
+ void CreateReverseMapping(const Array<PrimExpr> producer_indices) {
+   Map<Var, Range> iters;
+   for (const auto& iter_var : consumer_block_->iter_vars) {
+     iters.Set(iter_var->var, iter_var->dom);
+     if (is_const_int(iter_var->dom->extent, 1) && is_const_int(iter_var->dom->min)) {
+       idx_sub_[iter_var->var.get()] = iter_var->dom->min;
+     }
+   }
+   arith::Analyzer analyzer;
+   auto iter_map = arith::DetectIterMap(indices_, iters, true, arith::Bijective, &analyzer, true);
+   // LOG(INFO) << "DetectIterMap " << indices_ << "\n" << iter_map;
+   auto reverse = arith::InverseAffineIterMap(iter_map->indices, producer_indices);
+   for (const auto& p : reverse) {
+     // LOG(INFO) << "Map " << p.first->name_hint << p.second;
+     idx_sub_[p.first.get()] = p.second;
+   }
+ }
 
-  Stmt ReplaceInlinedBuffer(BufferStore producer) {
-    CreateInverseMapping(producer->indices);
-    producer_rhs_ = producer->value;
-    return Substituter(this)(GetRef<BufferStore>(inlined_store_));
-  }
+ Stmt ReplaceInlinedBuffer(BufferStore producer) {
+   CreateReverseMapping(producer->indices);
+   // SetIndexSubstitution(producer->indices);
+   producer_rhs_ = producer->value;
+   return Substituter(this)(GetRef<BufferStore>(inlined_store_));
+ }
 
  /*!
   * \brief Extracts expressions that loads a specific buffer
@@ -632,32 +630,8 @@ private:
    return std::move(extractor.result);
  }
 
-  /*!
-   * \brief Update `buffer_load_indices_` with the given indices. If `buffer_load_indices_` is
-   *        already non-empty, check it is consistent with the given indices.
-   * \param indices The indices
-   * \param expected_ndim The expected ndim of the access
-   * \return A boolean flag indicating if the check is successful
-   */
-  bool UpdateAndCheckIndexExprs(const Array<PrimExpr>& indices) {
-    if (buffer_load_indices_.empty()) {
-      buffer_load_indices_ = indices;
-    } else if (!std::equal(buffer_load_indices_.begin(), buffer_load_indices_.end(),
-                           indices.begin(), indices.end(), ExprDeepEqual())) {
-      // Failure: indices are not consistent in different BufferLoads
-      return false;
-    }
-    return true;
-  }
-
-  /*! \brief The RHS value of the producer's BufferStore statement */
-  PrimExpr producer_rhs_{nullptr};
-  /*! \brief The indices of the consumer's BufferLoad */
-  Array<PrimExpr> buffer_load_indices_;
-  /*! \brief The IterMap representing the indices of the consumer's BufferLoad */
-  Array<arith::IterSumExpr> buffer_load_iter_map_{nullptr};
-  /*! \brief The arithmetic analyzer */
-  arith::Analyzer analyzer;
+ /*! \brief The RHS value of the producer's BufferStore statement */
+ PrimExpr producer_rhs_{nullptr};
 };
 
 std::function<void()> ComputeInlineImpl(ScheduleState self, const StmtSRef& producer_block_sref) {

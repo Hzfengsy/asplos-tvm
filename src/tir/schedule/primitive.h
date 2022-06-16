@@ -277,6 +277,8 @@ TVM_DLL StmtSRef CacheWrite(ScheduleState self, const StmtSRef& block_sref, int 
  * \return The reindex stage block.
  */
 TVM_DLL StmtSRef ReIndex(ScheduleState self, const StmtSRef& block_sref, int buffer_index,
+                         BufferIndexType buffer_index_type);
+
 /******** Schedule: Data movement ********/
 
 TVM_DLL StmtSRef ReadAt(ScheduleState self, const StmtSRef& loop_sref, const StmtSRef& block_sref,

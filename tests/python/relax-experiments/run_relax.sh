@@ -4,7 +4,7 @@ RPC_PORT=4445
 RPC_KEY="rtx-3080"
 TARGET="nvidia/geforce-rtx-3080"
 LOG_DIR=logs/relax-cuda/
-CMD="python3 tests/python/relax-experiments/e2e-bert.py"
+CMD="python3 e2e_bert.py"
 
 mkdir -p $LOG_DIR
 
