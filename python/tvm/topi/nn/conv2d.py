@@ -757,7 +757,7 @@ def conv(
         Layout of the filter. I indicates input channels, O indicates output channels,
         any other character indicates HW dimension of the filter (or H or HWD for 1D and 3D).
         If kernel_layout is empty, use data_layout to infer the default kernel_layout
-        
+
     out_dtype : str
         Elements are converted to this type before elementwise multiplication
         and summation.
@@ -791,8 +791,8 @@ def conv(
         dilations = list(dilation)
 
     # transform from order to NCHW
-    permutation_to = [order.find("N"), order.find("C")] + [
-        x.span()[0] for x in re.finditer("[^NC]", order)
+    permutation_to = [data_layout.find("N"), data_layout.find("C")] + [
+        x.span()[0] for x in re.finditer("[^NC]", data_layout)
     ]
     # transform from NCHW to order
     permutation_from = np.argsort(permutation_to)
@@ -804,7 +804,7 @@ def conv(
         # kernel permutation, if C appears before HW then num_filter is first, otherwise it is last
         # tkonolige: I don't really understand kernel ordering for NHWC, it seems
         # like num_filters should match the N dimension
-        if order.find("C") < re.search("[^NC]", order).span()[0]:
+        if data_layout.find("C") < re.search("[^NC]", data_layout).span()[0]:
             permutation_to_kernel = [0, 1] + list(range(2, dim + 2))
         else:
             permutation_to_kernel = [dim + 1, dim] + list(range(dim))
@@ -878,8 +878,8 @@ def conv(
         list(np.array([batch, out_channel] + out_dimensions)[permutation_from]),
         compute,
         # tag is expected to be lowercase
-        tag=f"{'group_' if groups > 1 else ''}conv{dim}d_{order.lower()}",
-        name=f"{'group_' if groups > 1 else ''}conv{dim}d_{order.lower()}",
+        tag=f"{'group_' if groups > 1 else ''}conv{dim}d_{data_layout.lower()}",
+        name=f"{'group_' if groups > 1 else ''}conv{dim}d_{data_layout.lower()}",
         attrs={"layout_free_placeholders": [filt]} if auto_scheduler_should_rewrite_layout else {},
         varargs_names=list(np.array(["nn", "ff", "yy", "xx", "zz"])[permutation_from]),
     )

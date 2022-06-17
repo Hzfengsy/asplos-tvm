@@ -17,10 +17,12 @@
  * under the License.
  */
 
+#include <tvm/arith/analyzer.h>
 #include <tvm/relax/analysis.h>
 #include <tvm/tir/analysis.h>
 #include <tvm/tir/expr_functor.h>
 #include <tvm/tir/function.h>
+#include <tvm/tir/op.h>
 #include <tvm/tir/stmt_functor.h>
 
 namespace tvm {
@@ -67,11 +69,16 @@ class PatternKindAnalyzer : public StmtExprVisitor {
     // Step 1. Clear loads and store
     loads_.clear();
     store_ = NullOpt;
-    // Step 2. Visit block body.
+    // Step 2. Update block var maps
+    for (const IterVar& var : op->iter_vars) {
+      analyzer_.Bind(var->var, var->dom);
+    }
+
+    // Step 4. Visit block body.
     StmtVisitor::VisitStmt(op->body);
     BufferStore store = store_.value();
 
-    // Step 3. Checking load store indices pattern
+    // Step 5. Checking load store indices pattern
     relay::OpPatternKind index_pair_pattern = relay::kElemWise;
     bool has_elem_wise = false;
     for (const BufferLoad& load : loads_) {
@@ -81,7 +88,7 @@ class PatternKindAnalyzer : public StmtExprVisitor {
       // E.g Here is only one store node but two load nodes, like C[i, j] = A[i, j] + B[i]
       // Buffer C and A are elemwise but C and B are broadcast. So the whole block follows
       // broadcast pattern.
-      if (IsElemwisePattern(store, load)) {
+      if (IsElemwisePattern(store, load, &analyzer_)) {
         index_pair_pattern = std::max(index_pair_pattern, relay::kElemWise);
         has_elem_wise = true;
       } else if (IsBroadcastPattern(store, load)) {
@@ -109,7 +116,7 @@ class PatternKindAnalyzer : public StmtExprVisitor {
       return;
     }
 
-    // Step 4. Checking if the block contains reduce axis by looking into block iterators.
+    // Step 6. Checking if the block contains reduce axis by looking into block iterators.
     bool has_reduction = false;
     Array<tir::Var> reduce_vars;
     for (const IterVar& it : op->iter_vars) {
@@ -120,7 +127,7 @@ class PatternKindAnalyzer : public StmtExprVisitor {
     }
 
     if (has_reduction) {
-      if (IsFMA(op->body)) {
+      if (IsFMA(op->body, &analyzer_)) {
         // FMA is regards as kOutEWiseFusable, e.g. Matmul or Conv.
         kind_ = std::max(kind_, relay::kOutEWiseFusable);
         return;
@@ -138,17 +145,21 @@ class PatternKindAnalyzer : public StmtExprVisitor {
     } else {
       kind_ = relay::kOpaque;
     }
+
+    // Note: there should be a step 7 to remove block var iters from iter_var_ranges_
+    // But all block vars are unique, so we can skip this step.
   }
 
   /********** Helper Functions **********/
 
   /*! \brief Checking if two arrays contains same elements. */
-  static bool IsSameArray(const Array<PrimExpr>& lhs, const Array<PrimExpr>& rhs) {
+  static bool IsSameArray(const Array<PrimExpr>& lhs, const Array<PrimExpr>& rhs,
+                          arith::Analyzer* analyzer) {
     if (lhs.size() != rhs.size()) {
       return false;
     }
     for (size_t i = 0; i < lhs.size(); ++i) {
-      if (!lhs[i].same_as(rhs[i])) {
+      if (!analyzer->CanProveEqual(lhs[i], rhs[i])) {
         return false;
       }
     }
@@ -160,8 +171,9 @@ class PatternKindAnalyzer : public StmtExprVisitor {
    * It's elemwise pattern iff load indices and store indices are the same.
    * E.g A[i, j] = B[i, j]
    */
-  static bool IsElemwisePattern(const BufferStore& store, const BufferLoad& load) {
-    return IsSameArray(store->indices, load->indices);
+  static bool IsElemwisePattern(const BufferStore& store, const BufferLoad& load,
+                                arith::Analyzer* analyzer) {
+    return IsSameArray(store->indices, load->indices, analyzer);
   }
 
   /*!
@@ -249,13 +261,13 @@ class PatternKindAnalyzer : public StmtExprVisitor {
   }
 
   /*! \brief Checking if the stmt is multiply add. E.g. C[i, j] += A[i, k] * B[j, k] */
-  static bool IsFMA(const Stmt& body) {
+  static bool IsFMA(const Stmt& body, arith::Analyzer* analyzer) {
     if (const auto* store = body.as<BufferStoreNode>()) {
       if (const auto* add = store->value.as<AddNode>()) {
         if (const auto* l = add->a.as<BufferLoadNode>()) {
           if (const auto* r = add->b.as<MulNode>()) {
-            bool incremental =
-                store->buffer.same_as(l->buffer) && IsSameArray(store->indices, l->indices);
+            bool incremental = store->buffer.same_as(l->buffer) &&
+                               IsSameArray(store->indices, l->indices, analyzer);
             const auto* l_load = r->a.as<BufferLoadNode>();
             const auto* r_load = r->b.as<BufferLoadNode>();
             if (incremental && l_load && r_load) {
@@ -308,6 +320,8 @@ class PatternKindAnalyzer : public StmtExprVisitor {
   relay::OpPatternKind kind_ = relay::kElemWise;
   /*! \brief The buffers from function params. I.e. the input and output buffers. */
   std::unordered_set<Buffer, ObjectPtrHash, ObjectPtrEqual> param_buffers_;
+  /*! \brief deep equal */
+  arith::Analyzer analyzer_;
 
  public:
   relay::OpPatternKind GetResult() { return kind_; }
