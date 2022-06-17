@@ -40,6 +40,7 @@ void JSONDumps(ObjectRef json_obj, std::ostringstream& os) {
       os << int_imm->value;
     }
   } else if (const auto* float_imm = json_obj.as<FloatImmNode>()) {
+    os.setf(std::ios::showpoint);
     os << std::setprecision(20) << float_imm->value;
   } else if (const auto* str = json_obj.as<runtime::StringObj>()) {
     os << '"' << support::StrEscape(str->data, str->size) << '"';
