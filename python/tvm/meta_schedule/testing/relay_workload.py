@@ -29,6 +29,7 @@ from tvm.ir import IRModule
 from tvm.meta_schedule import ExtractedTask, extract_task_from_relay
 from tvm.runtime import NDArray, load_param_dict, save_param_dict
 from tvm.target import Target
+
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
@@ -52,6 +53,7 @@ def _get_network(
         "densenet_121",
         "resnet3d_18",
         "vgg_16",
+        "vit",
     ]:
         import torch  # type: ignore
         from torchvision import models  # type: ignore
@@ -74,6 +76,8 @@ def _get_network(
             model = models.video.r3d_18(pretrained=False)
         elif name == "vgg_16":
             model = getattr(models, name.replace("_", ""))(pretrained=False)
+        elif name == "vit":
+            model = getattr(models, name + "_l_32")(pretrained=False)
 
         dtype = "float32"
         input_data = torch.randn(input_shape).type(  # pylint: disable=no-member
@@ -183,6 +187,7 @@ def _save_cache(cache_dir: Optional[str], filename: str, objects: List[Any]) -> 
     path = os.path.join(os.path.expanduser(cache_dir), filename)
     with open(path, "wb") as o_f:
         pickle.dump(objects, o_f)
+
 
 def get_network(
     name: str,
