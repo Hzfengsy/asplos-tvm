@@ -19,30 +19,28 @@
 
 /*!
  * \file src/relay/backend/contrib/cutlass/codegen.cc
- * \brief The 'custom' compilation pass for CUTLASS (invoked by the RelayToTIRTargetHook pass).
+ * \brief Implementation of CUTLASS codegen.
  */
 
-#include <tvm/relay/attrs/memory.h>
 #include <tvm/relay/attrs/nn.h>
+#include <tvm/relay/expr_functor.h>
 #include <tvm/relay/transform.h>
 #include <tvm/relay/type.h>
 #include <tvm/runtime/module.h>
 #include <tvm/runtime/registry.h>
 
+#include <fstream>
 #include <numeric>
 #include <sstream>
 
-#include "../../../transforms/compiler_function_utils.h"
 #include "../../utils.h"
 #include "../codegen_c/codegen_c.h"
 
 namespace tvm {
 namespace relay {
 namespace contrib {
-namespace cutlass {
 
-namespace {
-
+using namespace backend;
 using Str2StrMap = std::unordered_map<std::string, std::string>;
 
 static Str2StrMap dtype_map = {{"float16", "cutlass::half_t"},
@@ -509,8 +507,7 @@ std::string Conv2dOp(std::string id, const Str2StrMap& attrs,
   return conv2d_decl.str();
 }
 
-class CodegenCutlass : public backend::MemoizedExprTranslator<std::vector<Output>>,
-                       public CodegenCBase {
+class CodegenCutlass : public MemoizedExprTranslator<std::vector<Output>>, public CodegenCBase {
  public:
   CodegenCutlass(const std::string& id, const Map<String, ObjectRef>& attrs) {
     this->ext_func_id_ = id;
@@ -596,8 +593,6 @@ class CodegenCutlass : public backend::MemoizedExprTranslator<std::vector<Output
 
   GenerateBodyOutput GenerateCompositeFunctionCall(const FunctionNode* callee,
                                                    const CallNode* caller) {
-    using backend::GetRootCall;
-
     const auto pattern_name = callee->GetAttr<runtime::String>(attr::kComposite);
     ICHECK(pattern_name.defined()) << "Only functions with composite attribute are supported.";
 
@@ -784,22 +779,22 @@ class CodegenCutlass : public backend::MemoizedExprTranslator<std::vector<Output
   std::vector<std::string> buf_decl_;
 };  // class CodegenCutlass
 
-class CutlassModuleCodegen {
+class CutlassModuleCodegen : public CSourceModuleCodegenBase {
  public:
-  explicit CutlassModuleCodegen(IRModule mod) : mod_(std::move(mod)) {}
-
-  runtime::Module CreateCSourceModule() {
-    EmitPreamble();
-    for (const auto& kv : mod_->functions) {
-      if (const auto* function_node = GetCutlassFunctionNode(kv.second)) {
-        GenCutlassFunc(GetRef<Function>(function_node));
-      }
-    }
-    return Finalize();
+  std::pair<std::string, Array<String>> GenCutlassFunc(const Function& func) {
+    ICHECK(func.defined()) << "Input error: expect a Relay function.";
+    // Record the external symbol for runtime lookup.
+    auto sid = GetExtSymbol(func);
+    const auto* attrs = func->attrs.as<DictAttrsNode>();
+    ICHECK(attrs != nullptr);
+    const auto dict = attrs->dict;
+    CodegenCutlass builder(sid, dict);
+    auto out = builder.VisitExpr(func->body);
+    code_stream_ << builder.JIT(out);
+    return {sid, {}};
   }
 
- private:
-  void EmitPreamble() {
+  runtime::Module CreateCSourceModule(const ObjectRef& ref) override {
     // create header
     code_stream_ << "#include <cstdint>\n";
     code_stream_ << "#include <cstdlib>\n";
@@ -829,101 +824,34 @@ class CutlassModuleCodegen {
     code_stream_ << "#include <cutlass/conv/kernel/default_conv2d_fprop_with_broadcast.h>\n";
     code_stream_ << "#include <cutlass/reduction/device/reduce_split_k.h>\n";
     code_stream_ << "#include <cutlass/reduction/thread/reduction_operators.h>\n";
-  }
 
-  void GenCutlassFunc(const Function& function) {
-    ICHECK(function.defined()) << "Input error: expect a Relay function.";
-
-    // Record the external symbol for runtime lookup.
-    Optional<String> opt_global_symbol = function->GetAttr<String>(tvm::attr::kGlobalSymbol);
-    ICHECK(opt_global_symbol.defined())
-        << "CUTLASS functions must have a " << tvm::attr::kGlobalSymbol << " attribute";
-    std::string sid = opt_global_symbol.value();
-    if (std::find(func_names_.begin(), func_names_.end(), sid) != func_names_.end()) {
-      // Already emitted.
-      return;
-    }
-    func_names_.push_back(sid);
-
-    const auto* attrs = function->attrs.as<DictAttrsNode>();
-    ICHECK(attrs != nullptr);
-    const auto dict = attrs->dict;
-    CodegenCutlass builder(sid, dict);
-    VLOG(1) << "Creating cutlass C code for '" << sid << "' from:\n" << PrettyPrint(function);
-    auto out = builder.VisitExpr(function->body);
-    code_stream_ << builder.JIT(out);
-  }
-
-  runtime::Module Finalize() {
-    ICHECK(!func_names_.empty())
-        << "Should only create CUTLASS CSourceModule if have at least one CUTLASS partition";
+    ICHECK(ref->IsInstance<FunctionNode>());
+    auto res = GenCutlassFunc(Downcast<Function>(ref));
+    std::string code = code_stream_.str();
+    String sym = std::get<0>(res);
+    Array<String> variables = std::get<1>(res);
+    // Create a CSource module
     const auto* pf = runtime::Registry::Get("runtime.CSourceModuleCreate");
     ICHECK(pf != nullptr) << "Cannot find CSource module to create the external runtime module";
-    VLOG(1) << "Generated CUTLASS code:" << std::endl << code_stream_.str();
-    return (*pf)(code_stream_.str(), "cu", func_names_, const_vars_);
+    return (*pf)(code, "cu", Array<String>{sym}, variables);
   }
 
-  /*!
-   * \brief Returns \p expr as function if it is a \p Function with "Compiler" attribute
-   * value "cutlass".
-   */
-  const FunctionNode* GetCutlassFunctionNode(const Expr& expr) {
-    if (const auto* function_node = expr.as<FunctionNode>()) {
-      Optional<String> opt_compiler = function_node->GetAttr<String>(attr::kCompiler);
-      if (opt_compiler.defined() && opt_compiler.value() == "cutlass") {
-        return function_node;
-      }
-    }
-    return nullptr;
-  }
-
-  /*! \brief Module we are compiling. */
-  IRModule mod_;
-  /*! \brief The accumulated code stream that will be compiled by NVCC */
+ private:
+  /*! \brief The code stream that will be compiled by NVCC */
   std::ostringstream code_stream_;
-  /*! \brief The accumulated function names. */
-  Array<String> func_names_;
-  /*! \brief The accumulated constant names. */
-  Array<String> const_vars_;
 };  // CutlassModuleCodegen
 
 /*!
- * \brief A small shim to redirect to the 'relay.ext.cutlass.compile_for_cutlass' Python
- * function which does the main CUTLASS training, c-code generation and compilation steps.
+ * \brief The external cutlass compiler/codegen tool. It takes a Relay
+ * expression/module and compile it into a runtime module.
  */
-transform::Pass CompileForCutlassImpl() {
-  auto pass_func = [=](IRModule mod, const transform::PassContext& pass_ctx) {
-    VLOG(1) << "CompileForCutlass input:" << std::endl << PrettyPrint(mod);
-    const auto* pf = runtime::Registry::Get("relay.ext.cutlass.compile_for_cutlass");
-    ICHECK(pf != nullptr) << "Cannot find compile_for_cutlass function";
-    Optional<Target> opt_cutlass_target = Target::Current();
-    ICHECK(opt_cutlass_target.defined()) << "Expecting Target::Current to be available";
-    ICHECK_EQ(opt_cutlass_target.value()->kind->name, "cutlass");
-    runtime::Module runtime_mod = (*pf)(mod, opt_cutlass_target.value());
-    Array<runtime::Module> external_mods =
-        mod->GetAttr<Array<runtime::Module>>("external_mods", Array<runtime::Module>()).value();
-    external_mods.push_back(runtime_mod);
-    return WithAttr(mod, "external_mods", external_mods);
-  };
-  return tvm::transform::CreateModulePass(pass_func, 0, "CompileForCutlass", {});
+runtime::Module CutlassCompiler(const ObjectRef& ref) {
+  CutlassModuleCodegen cutlass;
+  return cutlass.CreateCSourceModule(ref);
 }
 
-runtime::Module CreateCSourceModule(const IRModule& mod) {
-  VLOG(1) << "Creating CUTLASS CSource module from:" << std::endl << PrettyPrint(mod);
-  return CutlassModuleCodegen(mod).CreateCSourceModule();
-}
+TVM_REGISTER_GLOBAL("relay.ext.cutlass").set_body_typed(CutlassCompiler);
 
-}  // namespace
-
-TVM_REGISTER_GLOBAL("relay.ext.cutlass.create_c_source_module").set_body_typed(CreateCSourceModule);
-
-transform::Pass CompileForCutlass() {
-  return transform::Sequential(
-      {transforms::OutlineCompilerFunctionsWithExistingGlobalSymbols("cutlass"),
-       CompileForCutlassImpl(), transforms::MarkCompilerFunctionsAsExtern("cutlass")});
-}
-
-}  // namespace cutlass
 }  // namespace contrib
 }  // namespace relay
 }  // namespace tvm
