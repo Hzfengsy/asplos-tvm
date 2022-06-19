@@ -1167,7 +1167,6 @@ StmtSRef ReIndex(ScheduleState self, const StmtSRef& block_sref, int buffer_inde
   return result_block_sref;
 }
 
-
 /******** Instruction Registration ********/
 
 struct CacheReadTraits : public UnpackedInstTraits<CacheReadTraits> {
