@@ -528,6 +528,7 @@ class PredicatePrecompute : public StmtMutator {
     pre_computed = false;
     AttrStmt result = Downcast<AttrStmt>(StmtMutator::VisitStmt_(attr));
     auto* result_ptr = result.CopyOnWrite();
+    if (result_ptr->attr_key != "thread_extent") return GetRef<Stmt>(result_ptr);
     // append the pre-computation of predicate buffers
     if (!pre_computed) {
       // append the initialization of addr buffer
