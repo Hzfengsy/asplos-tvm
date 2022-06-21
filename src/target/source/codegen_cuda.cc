@@ -895,15 +895,30 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::ptx_cp_async())) {
     std::string dst = this->PrintExpr(op->args[0]);
     std::string dst_offset = this->PrintExpr(op->args[1]);
-    std::string src = this->PrintExpr(op->args[2]);
-    std::string src_offset = this->PrintExpr(op->args[3]);
+    const BufferLoadNode* addr = op->args[3].as<BufferLoadNode>();
+    std::string src, src_offset;
+    if (addr != nullptr && cached_address_.count(addr->buffer->data)) {
+      src = GetVarID(addr->buffer->data.get());
+      src_offset = "0";
+    } else {
+      src = this->PrintExpr(op->args[2]);
+      src_offset = this->PrintExpr(op->args[3]);
+    }
+    LOG(INFO) << src << " " << src_offset;
     std::string size = this->PrintExpr(op->args[4]);
     this->stream << PrintCpAsyncAssembly(dst, dst_offset, src, src_offset, size);
   } else if (op->op.same_as(builtin::ptx_cp_async_zfill())) {
     std::string dst = this->PrintExpr(op->args[0]);
     std::string dst_offset = this->PrintExpr(op->args[1]);
-    std::string src = this->PrintExpr(op->args[2]);
-    std::string src_offset = this->PrintExpr(op->args[3]);
+    const BufferLoadNode* addr = op->args[3].as<BufferLoadNode>();
+    std::string src, src_offset;
+    if (addr != nullptr && cached_address_.count(addr->buffer->data)) {
+      src = GetVarID(addr->buffer->data.get());
+      src_offset = "0";
+    } else {
+      src = this->PrintExpr(op->args[2]);
+      src_offset = this->PrintExpr(op->args[3]);
+    }
     std::string size = this->PrintExpr(op->args[4]);
     std::string pred_guard = this->PrintExpr(op->args[5]);
     this->stream << PrintCpAsyncZfillAssembly(dst, dst_offset, src, src_offset, size, pred_guard);
