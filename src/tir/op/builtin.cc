@@ -250,6 +250,9 @@ TIR_DEFINE_BUILTIN_FUNC(ptx_ldmatrix)
 TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(ptx_cp_async_zfill)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 TIR_DEFINE_BUILTIN_FUNC(ptx_commit_group)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 

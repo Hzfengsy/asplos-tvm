@@ -642,6 +642,15 @@ TVM_DLL const Op& ptx_ldmatrix();
 TVM_DLL const Op& ptx_cp_async();
 
 /*!
+ * \brief tvm intrinsics for ptx async copy from global to shared memory
+ *
+ * void ptx_cp_async_zfill(Var shared_ptr, Expr shared_offset, Var global_ptr, Expr global_offset,
+ * size_t bytes, Expr pred_guard);
+ *
+ */
+TVM_DLL const Op& ptx_cp_async_zfill();
+
+/*!
  * \brief tvm intrinsics for ptx async copy commit and wait.
  *
  * void ptx_commit_group();

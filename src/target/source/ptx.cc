@@ -665,5 +665,35 @@ std::string PrintCpAsyncAssembly(const std::string& shared_ptr,
   return asm_code;
 }
 
+std::string PrintCpAsyncZfillAssembly(const std::string& shared_ptr,
+                                 const std::string& shared_elem_offset,
+                                 const std::string& global_ptr,
+                                 const std::string& global_elem_offset, const std::string& bytes,
+                                 const std::string& pred_guard) {
+  std::string asm_code = R"(
+  {
+    unsigned int smem_ptr;
+    int src_in_bytes = ({pred_guard} ? {bytes} : 0);
+    __asm__ __volatile__(
+      "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
+      : "=r"(smem_ptr)
+      : "l"((void *)({smem_addr}))
+    );
+    __asm__ __volatile__(
+      "cp.async.{cg_or_ca}.shared.global [%0], [%1], %2, %3;"
+       :: "r"(smem_ptr), "l"((void*)({global_ptr})), "n"({bytes}), "r"(src_in_bytes)
+    );
+  }
+)";
+  Replacer replacer;
+  replacer.register_rule("{smem_addr}", shared_ptr + " + " + shared_elem_offset);
+  replacer.register_rule("{global_ptr}", global_ptr + " + " + global_elem_offset);
+  replacer.register_rule("{bytes}", bytes);
+  replacer.register_rule("{cg_or_ca}", bytes == "16" ? "cg" : "ca");
+  replacer.register_rule("{pred_guard}", pred_guard);
+  asm_code = replacer.rewrite(asm_code);
+  return asm_code;
+}
+
 }  // namespace codegen
 }  // namespace tvm

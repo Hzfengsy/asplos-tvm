@@ -92,6 +92,11 @@ std::string PrintCpAsyncAssembly(const std::string& shared_ptr,
                                  const std::string& global_ptr,
                                  const std::string& global_elem_offset, const std::string& bytes);
 
+std::string PrintCpAsyncZfillAssembly(const std::string& shared_ptr,
+                                      const std::string& shared_elem_offset,
+                                      const std::string& global_ptr,
+                                      const std::string& global_elem_offset, const std::string& bytes,
+                                      const std::string& pred_guard);
 }  // namespace codegen
 }  // namespace tvm
 
