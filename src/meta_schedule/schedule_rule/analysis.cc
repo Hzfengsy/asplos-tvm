@@ -100,6 +100,92 @@ Optional<LoopRV> TilingwithTensorIntrin(const Schedule& sch, const BlockRV& bloc
   return reorder_suffix[0];
 }
 
+
+Optional<LoopRV> TransformWithTensorIntrin(const tir::Schedule& sch, const tir::BlockRV&
+                                                                         block_rv, const String&
+                                               intrin_name, Array<BlockRV>* reindex_block_rvs) {
+  Optional<tir::LayoutInfo> opt_layout_info =
+      GetTensorizeLayoutInfo(sch->state(), sch->GetSRef(block_rv),
+                             tir::TensorIntrin::Get(intrin_name)->desc);
+  ICHECK(opt_layout_info.defined());
+  if (!opt_layout_info) return NullOpt;
+  const tir::LayoutInfoNode* info = opt_layout_info.value().get();
+  
+  tir::StmtSRef block_sref = sch->GetSRef(block_rv);
+  const tir::BlockNode* block = TVM_SREF_TO_BLOCK(block, block_sref);
+  // collect the buffers
+  std::unordered_map<tir::Buffer, std::pair<size_t, bool>, ObjectPtrHash, ObjectEqual> buffers;
+  for (size_t i = 0; i < block->reads.size(); ++i) {
+    buffers[block->reads[i]->buffer] = std::move(std::make_pair(i, true));
+  }
+  for (size_t i = 0; i < block->writes.size(); ++i) {
+    buffers[block->writes[i]->buffer] = std::move(std::make_pair(i, false));
+  }
+  // Reindex buffers and insert reindex stage
+  BlockRV reindex_store = sch->ReIndex(block_rv, 0, tir::BufferIndexType::kWrite);
+  BlockRV reindex_A = sch->ReIndex(block_rv, 0, tir::BufferIndexType::kRead);
+  BlockRV reindex_B = sch->ReIndex(block_rv, 1, tir::BufferIndexType::kRead);
+  reindex_block_rvs->push_back(reindex_store);
+  reindex_block_rvs->push_back(reindex_A);
+  reindex_block_rvs->push_back(reindex_B);
+  block_sref = sch->GetSRef(block_rv);
+  block = TVM_SREF_TO_BLOCK(block, block_sref);
+  
+  // Transform the layout of reindex buffers accordingly
+  std::unordered_set<tir::Var, ObjectPtrHash, ObjectPtrEqual> unmapped_vars;
+  std::unordered_map<tir::Var, tir::Var, ObjectPtrHash, ObjectPtrEqual> representer_map;
+  std::unordered_map<tir::Var, PrimExpr, ObjectPtrHash, ObjectPtrEqual> tgt_iter_map;
+  size_t offset = info->mapping->final_indices.size() - info->rhs_iters.size();
+  ICHECK_EQ(info->lhs_iters.size(), info->mapping->initial_indices.size());
+  for (size_t i = 0; i < info->lhs_iters.size(); ++i) {
+    representer_map[info->lhs_iters[i]->var] = info->mapping->initial_indices[i];
+  }
+  for (size_t i = 0; i < offset; ++i) {
+    const tir::VarNode* var_ptr = info->mapping->final_indices[i].as<tir::VarNode>();
+    ICHECK(var_ptr != nullptr);
+    unmapped_vars.insert(GetRef<tir::Var>(var_ptr));
+  }
+  for (size_t i = offset; i < info->mapping->final_indices.size(); ++i) {
+    tgt_iter_map[info->rhs_iters[i - offset]->var] = info->mapping->final_indices[i];
+  }
+  for (const auto& it : buffers) {
+    // organize the mappings for buffer layout transformation
+    const tir::Buffer& rhs_buffer = info->lhs_buffer_map[it.first];
+    std::vector<tir::Var> sub_representers;
+    std::vector<PrimExpr> sub_target_iters;
+    // Refresh block sref and handler
+    block_sref = sch->GetSRef(block_rv);
+    block = TVM_SREF_TO_BLOCK(block, block_sref);
+    const tir::BufferRegion& region = it.second.second ? block->reads[it.second.first] : block->writes[it.second.first];
+    for (const Range& range : region->region) {
+      ICHECK(tir::is_one(range->extent));
+      const tir::VarNode* var_ptr = range->min.as<tir::VarNode>();
+      ICHECK(var_ptr != nullptr);
+      const tir::Var& representer = representer_map[GetRef<tir::Var>(var_ptr)];
+      sub_representers.push_back(representer);
+      if (unmapped_vars.count(representer)) {
+        sub_target_iters.push_back(representer);
+      }
+    }
+    for (size_t i = 0; i < info->rhs_indices_map[rhs_buffer].size(); ++i) {
+      const tir::VarNode* var = info->rhs_indices_map[rhs_buffer][i].as<tir::VarNode>();
+      ICHECK(var != nullptr);
+      sub_target_iters.push_back(tgt_iter_map[GetRef<tir::Var>(var)]);
+    }
+    sch->TransformLayout(block_rv, it.second.first,
+                         it.second.second ? tir::BufferIndexType::kRead : tir::BufferIndexType::kWrite,
+                         tir::IndexMap(sub_representers, sub_target_iters));
+  }
+  // Transform the layout of current block and reindex blocks
+  sch->TransformBlockLayout(reindex_store, info->mapping);
+  sch->TransformBlockLayout(reindex_A, info->mapping);
+  sch->TransformBlockLayout(reindex_B, info->mapping);
+  sch->TransformBlockLayout(block_rv, info->mapping);
+  
+  Array<LoopRV> loops = sch->GetLoops(block_rv);
+  return loops[loops.size() - info->rhs_iters.size()];
+}
+
 bool IsCacheReadSharedPattern(const For& loop) {
   Stmt pipeline_body;
   if (const auto* realize = loop->body.as<BlockRealizeNode>()) {

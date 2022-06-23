@@ -21,6 +21,8 @@
 #include "../utils.h"
 #include "multi_level_tiling.h"
 
+#include "analysis.h"
+
 namespace tvm {
 namespace meta_schedule {
 
@@ -28,13 +30,18 @@ namespace meta_schedule {
  * \brief Tile a subset of loops in the block according to the given tensor intrinsic, and annotate
  * the tiled block for tensorization by postproc rewrite.
  */
-tir::BlockRV TileForIntrin(tir::Schedule sch, tir::BlockRV block, const std::string& intrin_name) {
+tir::BlockRV TileForIntrin(tir::Schedule sch, tir::BlockRV block, const std::string& intrin_name,
+                           Array<BlockRV>* reindex_block_rvs) {
+  Optional<LoopRV> transformed_loop_rv = TransformWithTensorIntrin(sch, block, intrin_name,reindex_block_rvs);
+  ICHECK(transformed_loop_rv.defined());
   Optional<tir::LoopRV> tiled_loop_rv = TileWithTensorIntrin(sch, block, intrin_name);
   ICHECK(tiled_loop_rv.defined());
   tir::BlockRV outer_block = sch->Blockize(tiled_loop_rv.value());
   sch->Annotate(outer_block, tir::attr::meta_schedule_auto_tensorize, String(intrin_name));
   return outer_block;
 }
+
+
 
 /*!
  * \brief Extension of MultiLevelTiling for auto-tensorizing with a single intrinsic.
@@ -45,10 +52,22 @@ class MultiLevelTilingWithIntrinNode : public MultiLevelTilingNode {
   // tile the outerloops.
   virtual std::vector<State> ApplySubRules(std::vector<State> states) {
     states = SubRule(std::move(states), [&](State state) {
-      state.block_rv = TileForIntrin(state.sch, state.block_rv, intrin_name);
+      Array<BlockRV> reindex_block_rvs;
+      state.block_rv = TileForIntrin(state.sch, state.block_rv, intrin_name, &reindex_block_rvs);
+      state.reindex_store = reindex_block_rvs[0];
+      state.reindex_A = reindex_block_rvs[1];
+      state.reindex_B = reindex_block_rvs[2];
       return std::vector<State>(1, state);
     });
-    return MultiLevelTilingNode::ApplySubRules(states);
+    states= MultiLevelTilingNode::ApplySubRules(states);
+    states = SubRule(std::move(states), [&](State state) {
+      Array<BlockRV> reindex_block_rvs;
+      state.sch->ReverseComputeInline(state.reindex_store.value());
+      state.sch->ComputeInline(state.reindex_A.value());
+      state.sch->ComputeInline(state.reindex_B.value());
+      return std::vector<State>(1, state);
+    });
+    return states;
   }
 
  public:

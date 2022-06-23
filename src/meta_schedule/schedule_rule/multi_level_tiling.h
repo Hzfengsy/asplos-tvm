@@ -107,11 +107,11 @@ struct State {
   /*! \brief The Tensor Core cache write block for Tensor Core computation */
   Optional<BlockRV> tensor_core_store;
   /*! \brief The Tensor Core reindex block A for Tensor Core computation */
-  Optional<BlockRV> tensor_core_reindex_A;
+  Optional<BlockRV> reindex_A;
   /*! \brief The Tensor Core reindex block B for Tensor Core computation */
-  Optional<BlockRV> tensor_core_reindex_B;
+  Optional<BlockRV> reindex_B;
   /*! \brief The Tensor Core reindex store block for Tensor Core computation */
-  Optional<BlockRV> tensor_core_reindex_store;
+  Optional<BlockRV> reindex_store;
 
   /*! \brief Default constructor */
   explicit State(Schedule sch, BlockRV block_rv, Optional<BlockRV> write_cache = NullOpt,

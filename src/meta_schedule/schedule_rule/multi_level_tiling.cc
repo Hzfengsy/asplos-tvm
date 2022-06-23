@@ -309,9 +309,9 @@ Optional<LoopRV> MultiLevelTilingNode::TransformWithTensorIntrin(State& state, c
     buffers[block->writes[i]->buffer] = std::move(std::make_pair(i, false));
   }
   // Reindex buffers and insert reindex stage
-  state.tensor_core_reindex_store = state.sch->ReIndex(block_rv, 0, tir::BufferIndexType::kWrite);
-  state.tensor_core_reindex_A = state.sch->ReIndex(block_rv, 0, tir::BufferIndexType::kRead);
-  state.tensor_core_reindex_B = state.sch->ReIndex(block_rv, 1, tir::BufferIndexType::kRead);
+  state.reindex_store = state.sch->ReIndex(block_rv, 0, tir::BufferIndexType::kWrite);
+  state.reindex_A = state.sch->ReIndex(block_rv, 0, tir::BufferIndexType::kRead);
+  state.reindex_B = state.sch->ReIndex(block_rv, 1, tir::BufferIndexType::kRead);
   block_sref = state.sch->GetSRef(state.block_rv);
   block = TVM_SREF_TO_BLOCK(block, block_sref);
 
@@ -361,9 +361,9 @@ Optional<LoopRV> MultiLevelTilingNode::TransformWithTensorIntrin(State& state, c
                                tir::IndexMap(sub_representers, sub_target_iters));
   }
   // Transform the layout of current block and reindex blocks
-  state.sch->TransformBlockLayout(state.tensor_core_reindex_store.value(), info->mapping);
-  state.sch->TransformBlockLayout(state.tensor_core_reindex_A.value(), info->mapping);
-  state.sch->TransformBlockLayout(state.tensor_core_reindex_B.value(), info->mapping);
+  state.sch->TransformBlockLayout(state.reindex_store.value(), info->mapping);
+  state.sch->TransformBlockLayout(state.reindex_A.value(), info->mapping);
+  state.sch->TransformBlockLayout(state.reindex_B.value(), info->mapping);
   state.sch->TransformBlockLayout(state.block_rv, info->mapping);
 
   Array<LoopRV> loops = state.sch->GetLoops(state.block_rv);
@@ -377,8 +377,8 @@ State MultiLevelTilingNode::TensorCoreLoad(State state) const {
       state.sch->ReadAt(r_tiles.back(), state.block_rv, 0, "wmma.matrix_a");
   state.tensor_core_load_B =
       state.sch->ReadAt(r_tiles.back(), state.block_rv, 1, "wmma.matrix_b");
-  state.sch->ComputeInline(state.tensor_core_reindex_A.value());
-  state.sch->ComputeInline(state.tensor_core_reindex_B.value());
+  state.sch->ComputeInline(state.reindex_A.value());
+  state.sch->ComputeInline(state.reindex_B.value());
   tir::For loop = state.sch->Get(r_tiles.back());
   const tir::SeqStmtNode* pipeline_body_seq = loop->body.as<tir::SeqStmtNode>();
   ICHECK(pipeline_body_seq);
@@ -396,7 +396,7 @@ State MultiLevelTilingNode::TensorCoreStore(State state) const {
   int level = r_indices_.front() - 1;
   const LoopRV& loop = state.tiles[level].back();
   state.tensor_core_store = state.sch->WriteAt(loop, state.block_rv, 0, "wmma.accumulator");
-  state.sch->ReverseComputeInline(state.tensor_core_reindex_store.value());
+  state.sch->ReverseComputeInline(state.reindex_store.value());
   Array<FloatImm> probs(3, FloatImm(DataType::Float(64), 1.0 / 3));
   PrimExpr ann_val = state.sch->SampleCategorical({4, 8, 16}, probs);
   state.sch->Annotate(state.tensor_core_store.value(), tir::attr::vector_bytes, ann_val);

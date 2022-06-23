@@ -38,6 +38,11 @@ std::vector<int> GetReadBufferNDims(const StmtSRef& block_sref);
 Optional<LoopRV> TilingwithTensorIntrin(const tir::Schedule& sch, const tir::BlockRV& block_rv,
                                         const String& intrin_name);
 
+
+Optional<LoopRV> TransformWithTensorIntrin(const tir::Schedule& sch, const tir::BlockRV&
+                                                                         block_rv, const String&
+                                               intrin_name, Array<BlockRV>* reindex_block_rvs);
+
 /*!
  * \brief whether the loop's body has the pattern: 2 cache read shared followed by a nested
  * software pipeline
