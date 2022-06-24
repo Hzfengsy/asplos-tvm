@@ -231,6 +231,13 @@ def build_and_run(
     gen_module.set_input(**inputs)
     out = []
     for _ in range(no_runs):
+        evaluator = gen_module.module.time_evaluator(
+            "run",
+            device,
+            min_repeat_ms=500,
+            repeat=3,
+        )
+        print(evaluator())
         gen_module.run()
         out.append([gen_module.get_output(i) for i in range(outputs)])
     return out
