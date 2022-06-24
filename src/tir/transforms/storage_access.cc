@@ -29,6 +29,7 @@
 #include <utility>
 
 #include "ir_utils.h"
+#include "tvm/tir/builtin.h"
 
 namespace tvm {
 namespace tir {
@@ -242,7 +243,7 @@ void StorageAccessVisitor::VisitExpr_(const CallNode* op) {
       }
     }
     StmtExprVisitor::VisitExpr_(op);
-  } else if (op->op.same_as(builtin::tvm_storage_sync())) {
+  } else if (op->op.same_as(builtin::tvm_storage_sync()) || op->op.same_as(builtin::tvm_storage_no_sync())) {
     ICHECK(allow_append_);
     const std::string& s = op->args[0].as<StringImmNode>()->value;
     if (s != "warp") {

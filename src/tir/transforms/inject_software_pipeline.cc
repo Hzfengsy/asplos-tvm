@@ -544,6 +544,10 @@ class PipelineRewriter : public StmtExprMutator {
       stmts.push_back(BlockRealize({}, inbound, new_block));
     }
 
+    if (stmts.size() == 7) {
+      stmts.insert(stmts.begin() + 3, Evaluate(Call(DataType::Handle(), builtin::tvm_storage_no_sync(), {StringImm("shared")})));
+    }
+
     Stmt new_loop{nullptr};
 
     if (stmts.empty()) {

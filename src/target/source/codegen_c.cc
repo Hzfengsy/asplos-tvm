@@ -29,6 +29,7 @@
 
 #include "../../arith/pattern_match.h"
 #include "codegen_params.h"
+#include "tvm/tir/builtin.h"
 
 namespace tvm {
 namespace codegen {
@@ -1018,6 +1019,8 @@ void CodeGenC::VisitStmt_(const EvaluateNode* op) {
       }
       this->PrintIndent();
       this->stream << ref << " = " << cast << value << ";\n";
+      return;
+    } else if (call->op.same_as(builtin::tvm_storage_no_sync())) {
       return;
     }
   }
