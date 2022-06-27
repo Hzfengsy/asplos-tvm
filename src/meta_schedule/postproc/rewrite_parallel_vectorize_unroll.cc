@@ -366,8 +366,12 @@ class RewriteParallelVectorizeUnrollNode : public PostprocNode {
           tir::RewriteParallel(sch, parsed.num_parallel_loops, &loop_rvs);
         }
         // Vectorize
-        if (parsed.num_vectorize_loops > 0) {
-          tir::RewriteVectorize(sch, parsed.num_vectorize_loops, &loop_rvs);
+        tir::StmtSRef block_sref = sch->GetSRef(block_rv);
+        Optional<String> ann = tir::GetAnn<String>(block_sref, tir::attr::meta_schedule_auto_tensorize);
+        if(!ann.defined()){
+          if (parsed.num_vectorize_loops > 0) {
+            tir::RewriteVectorize(sch, parsed.num_vectorize_loops, &loop_rvs);
+          }
         }
         // AutoUnroll
         if (parsed.unroll_explicit != -1 || parsed.unroll_implicit != -1) {

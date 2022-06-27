@@ -24,7 +24,7 @@ from tvm._ffi.registry import register_func
 from tvm.ir import IRModule
 from tvm.target import Target
 from tvm.tir import PrimFunc
-from tvm.tir.tensor_intrin import ARM_DOT_4x4_i8_NEON_INTRIN as ARM_DOT_INTRIN
+from tvm.tir.tensor_intrin import ARM_DOT_4x4_i8_SDOT_INTRIN as ARM_DOT_INTRIN
 
 from .builder import Builder, LocalBuilder
 from .cost_model import CostModel, XGBModel

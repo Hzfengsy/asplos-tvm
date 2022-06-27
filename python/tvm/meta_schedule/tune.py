@@ -661,5 +661,6 @@ def tune_relax(
 
     with PassContext(opt_level=3):
         relax_mod = MetaScheduleApplyHistoryBest(database, target)(mod)
+        print(relax_mod.script())
         relax_ex = relax_build(relax_mod, target=target)
     return relax_ex

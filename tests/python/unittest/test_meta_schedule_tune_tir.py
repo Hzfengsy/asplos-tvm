@@ -51,13 +51,75 @@ def matmul(a: T.handle, b: T.handle, c: T.handle) -> None:
 
 
 # pylint: enable=no-member,invalid-name,unused-variable
-
+@T.prim_func
+def fused_dense_multiply_subtract_add_fixed_point_multiply_add1_clip_cast1(a_1: T.Buffer[(1024, 1024), "int8"], param_0_1: T.Buffer[(1024, 1024), "int8"], param_1_1: T.Buffer[(), "int32"], lv2_1: T.Buffer[(1024, 1), "int32"], param_2_1: T.Buffer[(1, 1024), "int32"], param_3_1: T.Buffer[(), "int32"], T_cast_1: T.Buffer[(1024, 1024), "int8"]) -> None:
+    # function attr dict
+    T.func_attr({"T.noalias": True, "global_symbol": "fused_dense_multiply_subtract_add_fixed_point_multiply_add1_clip_cast1"})
+    # body
+    # with T.block("root")
+    T_matmul_NT_1 = T.alloc_buffer([1024, 1024], dtype="int32")
+    T_multiply_1 = T.alloc_buffer([1024, 1], dtype="int32")
+    T_subtract_1 = T.alloc_buffer([1024, 1024], dtype="int32")
+    T_add_2 = T.alloc_buffer([1024, 1024], dtype="int32")
+    compute_2 = T.alloc_buffer([1024, 1024], dtype="int32")
+    T_add_3 = T.alloc_buffer([1024, 1024], dtype="int32")
+    compute_3 = T.alloc_buffer([1024, 1024], dtype="int32")
+    for i0_4, i1_4, i2 in T.grid(1024, 1024, 1024):
+        with T.block("T_matmul_NT"):
+            i, j, k = T.axis.remap("SSR", [i0_4, i1_4, i2])
+            T.reads(a_1[i, k], param_0_1[j, k])
+            T.writes(T_matmul_NT_1[i, j])
+            with T.init():
+                T_matmul_NT_1[i, j] = 0
+            T_matmul_NT_1[i, j] = T_matmul_NT_1[i, j] + T.cast(a_1[i, k], "int32") * T.cast(param_0_1[j, k], "int32")
+    for i0_5, i1_5 in T.grid(1024, 1):
+        with T.block("T_multiply"):
+            ax0, ax1 = T.axis.remap("SS", [i0_5, i1_5])
+            T.reads(param_1_1[()], lv2_1[ax0, 0])
+            T.writes(T_multiply_1[ax0, ax1])
+            T_multiply_1[ax0, ax1] = param_1_1[()] * lv2_1[ax0, 0]
+    for i0_6, i1_6 in T.grid(1024, 1024):
+        with T.block("T_subtract"):
+            ax0, ax1 = T.axis.remap("SS", [i0_6, i1_6])
+            T.reads(T_matmul_NT_1[ax0, ax1], T_multiply_1[ax0, 0])
+            T.writes(T_subtract_1[ax0, ax1])
+            T_subtract_1[ax0, ax1] = T_matmul_NT_1[ax0, ax1] - T_multiply_1[ax0, 0]
+    for i0_7, i1_7 in T.grid(1024, 1024):
+        with T.block("T_add"):
+            ax0, ax1 = T.axis.remap("SS", [i0_7, i1_7])
+            T.reads(T_subtract_1[ax0, ax1], param_2_1[0, ax1])
+            T.writes(T_add_2[ax0, ax1])
+            T_add_2[ax0, ax1] = T_subtract_1[ax0, ax1] + param_2_1[0, ax1]
+    for i0_8, i1_8 in T.grid(1024, 1024):
+        with T.block("compute"):
+            i0_9, i1_9 = T.axis.remap("SS", [i0_8, i1_8])
+            T.reads(T_add_2[i0_9, i1_9])
+            T.writes(compute_2[i0_9, i1_9])
+            compute_2[i0_9, i1_9] = T.q_multiply_shift(T_add_2[i0_9, i1_9], 1340867788, 31, -27, dtype="int32")
+    for i0_10, i1_10 in T.grid(1024, 1024):
+        with T.block("T_add_1"):
+            ax0, ax1 = T.axis.remap("SS", [i0_10, i1_10])
+            T.reads(param_3_1[()], compute_2[ax0, ax1])
+            T.writes(T_add_3[ax0, ax1])
+            T_add_3[ax0, ax1] = param_3_1[()] + compute_2[ax0, ax1]
+    for i0_11, i1_11 in T.grid(1024, 1024):
+        with T.block("compute_1"):
+            i0_12, i1_12 = T.axis.remap("SS", [i0_11, i1_11])
+            T.reads(T_add_3[i0_12, i1_12])
+            T.writes(compute_3[i0_12, i1_12])
+            compute_3[i0_12, i1_12] = T.max(T.min(T_add_3[i0_12, i1_12], 127), -128)
+    for i0_13, i1_13 in T.grid(1024, 1024):
+        with T.block("T_cast"):
+            ax0, ax1 = T.axis.remap("SS", [i0_13, i1_13])
+            T.reads(compute_3[ax0, ax1])
+            T.writes(T_cast_1[ax0, ax1])
+            T_cast_1[ax0, ax1] = T.cast(compute_3[ax0, ax1], "int8")
 
 @pytest.mark.skip("Integration test")
 def test_tune_matmul_cpu():
     with tempfile.TemporaryDirectory() as work_dir:
         sch: Schedule = tune_tir(
-            mod=matmul,
+            mod=fused_dense_multiply_subtract_add_fixed_point_multiply_add1_clip_cast1,
             target=Target("llvm --num-cores=16"),
             config=TuneConfig(
                 strategy="replay_trace",
@@ -259,5 +321,5 @@ def test_tune_matmul_cuda_tensor_core():
 
 if __name__ == """__main__""":
     test_tune_matmul_cpu()
-    test_tune_matmul_cuda()
-    test_tune_run_module_via_rpc()
+    # test_tune_matmul_cuda()
+    # test_tune_run_module_via_rpc()

@@ -42,7 +42,10 @@ tir::PrimFunc AnnotateOpPattern(tir::PrimFunc f) {
       kind = relay::kElemWise;
     } else if  (func_name.find("variance")!=std::string::npos ) {
       kind = relay::kCommReduce;
-    }else {
+    } else if (func_name.find("dense")!=std::string::npos){
+      kind= relay::kOutEWiseFusable;
+    }
+    else {
       kind = AnalyzeOpPatternKind(f);
     }
     return WithAttr(std::move(f), "op_pattern", Integer(static_cast<int>(kind)));

@@ -21,7 +21,7 @@ import inspect
 from typing import Callable
 import functools
 
-from tvm.relax import Function
+from tvm.relay import Function
 
 from .parser import from_source
 
