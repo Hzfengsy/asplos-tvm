@@ -161,6 +161,8 @@ class Postproc : public runtime::ObjectRef {
    * \return The postprocessor created
    */
   TVM_DLL static Postproc VerifyGPUCode();
+
+  TVM_DLL static Postproc InjectKernelCode(String string);
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(Postproc, ObjectRef, PostprocNode);
 };
 

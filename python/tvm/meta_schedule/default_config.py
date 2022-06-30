@@ -25,7 +25,8 @@ from tvm.ir import IRModule
 from tvm.target import Target
 from tvm.tir import PrimFunc
 from tvm.tir.tensor_intrin import ARM_DOT_4x4_i8_SDOT_INTRIN as ARM_DOT_INTRIN
-
+from tvm.tir.tensor_intrin import ARM_DOT_12x8_fp32_MICROKERNEL_INTRIN as ARM_MICROKERNEL_INTRIN
+from tvm.meta_schedule.testing.kernel import gemm_impl
 from .builder import Builder, LocalBuilder
 from .cost_model import CostModel, XGBModel
 from .database import Database, JSONDatabase
@@ -398,6 +399,73 @@ class _DefaultArm():
             M.RewriteParallelVectorizeUnroll(),
             M.RewriteReductionBlock(),
             M.RewriteTensorize()
+        ]
+
+    @staticmethod
+    def mutator_probs() -> Dict[Mutator, float]:
+        from tvm.meta_schedule import mutator as M
+
+        return {
+            M.MutateTileSize(): 0.9,
+            M.MutateComputeLocation(): 0.05,
+            M.MutateUnroll(): 0.03,
+            M.MutateParallel(max_jobs_per_core=16): 0.02,
+        }
+
+
+class _ARM_MicroKernel():
+    """Default tuning configuration for Arm."""
+    @staticmethod
+    def schedule_rules() -> List[ScheduleRule]:
+        from tvm.meta_schedule import schedule_rule as M
+
+        return [
+            M.AddRFactor(max_jobs_per_core=16, max_innermost_factor=64),
+            M.MultiLevelTilingWithIntrin(
+                ARM_MICROKERNEL_INTRIN,
+                structure="SSRSRS",
+                tile_binds=None,
+                max_innermost_factor=64,
+                vector_load_lens=None,
+                reuse_read=M.ReuseType(
+                    req="must",
+                    levels=[3],
+                    scope="global",
+                ),
+                reuse_write=M.ReuseType(
+                    req="must",
+                    levels=[1, 2],
+                    scope="global",
+                ),
+            ),
+            M.AutoInline(
+                into_producer=True,
+                into_consumer=True,
+                inline_const_tensor=True,
+                disallow_if_then_else=False,
+                require_injective=False,
+                require_ordered=False,
+                disallow_op=None,
+            ),
+            M.ParallelizeVectorizeUnroll(
+                max_jobs_per_core=16,
+                max_vectorize_extent=64,
+                unroll_max_steps=[0, 16, 64, 512],
+                unroll_explicit=True,
+            ),
+            M.RandomComputeLocation(),
+        ]
+
+    @staticmethod
+    def postprocs() -> List[Postproc]:
+        from tvm.meta_schedule import postproc as M
+
+        return [
+            M.DisallowDynamicLoop(),
+            M.RewriteParallelVectorizeUnroll(),
+            M.RewriteReductionBlock(),
+            M.RewriteTensorize(),
+            M.InjectKernelCode(gemm_impl())
         ]
 
     @staticmethod

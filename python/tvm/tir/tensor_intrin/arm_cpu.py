@@ -40,6 +40,22 @@ def dot_product_4x4_i8i8i32_desc(
                 with T.block("update"):
                     vi, vk = T.axis.remap("SR", [i, k])
                     C[vi] = C[vi] + T.cast(A[vk], "int32") * T.cast(B[vi, vk], "int32")
+@T.prim_func
+def dot_product_12x8_f32f32f32_desc(
+    a: T.handle, b: T.handle, c: T.handle
+) -> None:
+    A = T.match_buffer(a, (4, 12), "float32", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (4, 8), "float32", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (12, 8), "float32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:12, 0:8], A[0:4, 0:12], B[0:4, 0:8])
+        T.writes(C[0:12, 0:8])
+        for i in T.serial(0, 12):
+            for j in T.serial(0, 8):
+                for k in T.serial(0, 4):
+                    with T.block("update"):
+                        vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+                        C[vi, vj] = C[vi, vj] +A[vk, vi] * B[vk, vj]
 
 
 @T.prim_func
@@ -129,9 +145,32 @@ def dot_product_4x4_i8i8i32_sdot(
             dtype="int32x4",
         )
 
+@T.prim_func
+def dot_product_12x8_f32f32f32_microkernel(
+    a: T.handle, b: T.handle, c: T.handle
+) -> None:
+    A = T.match_buffer(a, (4, 12), "float32", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (4, 8), "float32", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (12, 8), "float32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:12, 0:8], A[0:4, 0:12], B[0:4, 0:8])
+        T.writes(C[0:12, 0:8])
+        T.evaluate(
+            T.call_extern(
+                "Run",
+                A.access_ptr("r"),
+                B.access_ptr("r"),
+                C.access_ptr("w"),
+                4,
+                dtype="handle"
+            )
+        )
+
 
 ARM_DOT_4x4_i8_NEON_INTRIN = "dot_4x4_i8i8s32_neon"
 ARM_DOT_4x4_i8_SDOT_INTRIN = "dot_4x4_i8i8s32_sdot"
+ARM_DOT_12x8_fp32_MICROKERNEL_INTRIN = "dot_12x8_f32f32f32_microkernel"
+
 
 TensorIntrin.register(
     ARM_DOT_4x4_i8_NEON_INTRIN, dot_product_4x4_i8i8i32_desc, dot_product_4x4_i8i8i32_neon
@@ -139,4 +178,8 @@ TensorIntrin.register(
 
 TensorIntrin.register(
     ARM_DOT_4x4_i8_SDOT_INTRIN, dot_product_4x4_i8i8i32_desc, dot_product_4x4_i8i8i32_sdot
+)
+
+TensorIntrin.register(
+    ARM_DOT_12x8_fp32_MICROKERNEL_INTRIN, dot_product_12x8_f32f32f32_desc, dot_product_12x8_f32f32f32_microkernel
 )
