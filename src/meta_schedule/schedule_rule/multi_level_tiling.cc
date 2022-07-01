@@ -230,12 +230,13 @@ std::vector<State> MultiLevelTilingNode::AddReadReuse(State state) const {
         cache_read_block = sch->CacheRead(block_rv, i, config.scope);
         // Insert cache_read block to the proper place
         sch->ComputeAt(cache_read_block, loop_rv, true);
-        // Fuse the iterators of the cache_read
-        Array<LoopRV> buffer_loops = sch->GetLoops(cache_read_block);
-        LoopRV fused = sch->Fuse(Array<LoopRV>{buffer_loops.end() - buffer_ndim,  //
-                                             buffer_loops.end()});
+
         // Annotate cooperative fetching
         if (!vector_load_lens.empty()) {
+          // Fuse the iterators of the cache_read
+          Array<LoopRV> buffer_loops = sch->GetLoops(cache_read_block);
+          LoopRV fused = sch->Fuse(Array<LoopRV>{buffer_loops.end() - buffer_ndim,  //
+                                              buffer_loops.end()});
           int n = vector_load_lens.size();
           double prob = 1.0 / n;
           tir::ExprRV vector_load_len =
