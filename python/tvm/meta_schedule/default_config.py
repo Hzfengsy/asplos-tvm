@@ -26,7 +26,6 @@ from tvm.target import Target
 from tvm.tir import PrimFunc
 from tvm.tir.tensor_intrin import ARM_DOT_4x4_i8_SDOT_INTRIN as ARM_DOT_INTRIN
 from tvm.tir.tensor_intrin import ARM_DOT_12x8_fp32_MICROKERNEL_INTRIN as ARM_MICROKERNEL_INTRIN
-from tvm.meta_schedule.testing.kernel import gemm_impl
 from .builder import Builder, LocalBuilder
 from .cost_model import CostModel, XGBModel
 from .database import Database, JSONDatabase
