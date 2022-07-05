@@ -397,7 +397,7 @@ def _alter_conv2d_layout(attrs, inputs, tinfos, out_type):
             topi_tmpl,
         )
         dispatch_ctx.update(target, new_workload, cfg)
-        return relay.nn.contrib_conv2d_nchwc(*inputs, **new_attrs)
+        return None
 
     if topi_tmpl == "conv2d_NHWC_quantized_interleaved.arm_cpu":
         # TODO(masahi): This schedule can easily result in a tensorization error

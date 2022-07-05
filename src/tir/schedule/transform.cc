@@ -258,6 +258,7 @@ Optional<LoopRV> TileWithTensorIntrin(const tir::Schedule& sch, const tir::Block
       loop2rv.Set(sch->GetSRef(loop_rv), loop_rv);
     }
   }
+  LOG(INFO)<<sch->mod();
   // Split the loops
   arith::Analyzer analyzer;
   std::unordered_set<const tir::StmtSRefNode*> inner_loops;
@@ -278,6 +279,7 @@ Optional<LoopRV> TileWithTensorIntrin(const tir::Schedule& sch, const tir::Block
     // Check divisibility
     int64_t total = int_block_extent->value;
     int64_t inner = int_desc_extent->value;
+    LOG(INFO)<<inner;
     ICHECK_EQ(total % inner, 0);
     int64_t outer = int_block_extent->value / int_desc_extent->value;
     // Do the split

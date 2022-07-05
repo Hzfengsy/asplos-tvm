@@ -40,6 +40,24 @@ def dot_product_4x4_i8i8i32_desc(
                 with T.block("update"):
                     vi, vk = T.axis.remap("SR", [i, k])
                     C[vi] = C[vi] + T.cast(A[vk], "int32") * T.cast(B[vi, vk], "int32")
+                    
+@T.prim_func
+def dot_product_12x8_i8i8i32_desc(
+    a: T.handle, b: T.handle, c: T.handle
+) -> None:
+    A = T.match_buffer(a, (12, 512), "int8", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (8, 512), "int8", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (12, 8), "int32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:12, 0:8], A[0:12, 0:512], B[0:8, 0:512])
+        T.writes(C[0:12, 0:8])
+        for i in T.serial(0, 12):
+            for j in T.serial(0, 8):
+                for k in T.serial(0, 512):
+                    with T.block("update"):
+                        vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+                        C[vi, vj] = C[vi, vj] +T.cast(A[vi, vk],"int32") * T.cast(B[vj, vk],"int32")                   
+
 @T.prim_func
 def dot_product_12x8_f32f32f32_desc(
     a: T.handle, b: T.handle, c: T.handle
@@ -145,6 +163,7 @@ def dot_product_4x4_i8i8i32_sdot(
             dtype="int32x4",
         )
 
+
 @T.prim_func
 def dot_product_12x8_f32f32f32_microkernel(
     a: T.handle, b: T.handle, c: T.handle
@@ -167,10 +186,170 @@ def dot_product_12x8_f32f32f32_microkernel(
         )
 
 
+@T.prim_func
+def dot_product_8x12_i8i8i32_desc(
+    a: T.handle, b: T.handle, c: T.handle
+) -> None:
+    A = T.match_buffer(a, (128, 8, 4), "int8", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (128, 12, 4), "int8", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (8, 12), "int32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:8, 0:12], A[0:128, 0:8, 0:4], B[0:128, 0:12, 0:4])
+        T.writes(C[0:8, 0:12])
+        for ko in T.serial(0, 128):
+            for i in T.serial(0, 8):
+                for j in T.serial(0, 12):
+                    for ki in T.serial(0, 4):
+                        with T.block("update"):
+                            vko, vi, vj, vki = T.axis.remap("RSSR", [ko, i, j, ki])
+                            C[vi, vj] = C[vi, vj] + T.cast(A[vko, vi, vki], "int32") * T.cast(B[vko, vj, vki], "int32")
+
+@T.prim_func
+def dot_product_8x12_i8i8i32_microkernel(
+    a: T.handle, b: T.handle, c: T.handle
+) -> None:
+    A = T.match_buffer(a, (128, 8, 4), "int8", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (128, 12, 4), "int8", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (8, 12), "int32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:8, 0:12], A[0:128, 0:8, 0:4], B[0:128, 0:12, 0:4])
+        T.writes(C[0:8, 0:12])
+        T.evaluate(
+            T.call_extern(
+                "a64_gemm_s8_8x12",
+                A.access_ptr("r"),
+                B.access_ptr("r"),
+                C.access_ptr("w"),
+                dtype="handle"
+            )
+        )
+
+
+@T.prim_func
+def dot_product_8x12x4_i8i8i32_desc(
+    a: T.handle, b: T.handle, c: T.handle
+) -> None:
+    A = T.match_buffer(a, (8, 4), "int8", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (12, 4), "int8", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (8, 12), "int32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:8, 0:12], A[0:8, 0:4], B[0:12, 0:4])
+        T.writes(C[0:8, 0:12])
+        for i in T.serial(0, 8):
+            for j in T.serial(0, 12):
+                for ki in T.serial(0, 4):
+                    with T.block("update"):
+                        vi, vj, vki = T.axis.remap("SSR", [i, j, ki])
+                        C[vi, vj] = C[vi, vj] + T.cast(A[vi, vki], "int32") * T.cast(B[vj, vki], "int32")
+
+@T.prim_func
+def dot_product_8x12x4_i8i8i32_microkernel(
+    a: T.handle, b: T.handle, c: T.handle
+) -> None:
+    A = T.match_buffer(a, (8, 4), "int8", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (12, 4), "int8", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (8, 12), "int32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:8, 0:12], A[0:8, 0:4], B[0:12, 0:4])
+        T.writes(C[0:8, 0:12])
+        T.evaluate(
+            T.call_extern(
+                "a64_gemm_s8_8x12",
+                A.access_ptr("r"),
+                B.access_ptr("r"),
+                C.access_ptr("w"),
+                dtype="handle"
+            )
+        )
+
+
+@T.prim_func
+def dot_product_8x12x16_i8i8i32_desc(
+    a: T.handle, b: T.handle, c: T.handle, k: T.int32
+) -> None:
+    A = T.match_buffer(a, (k, 8, 4), "int8", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (k, 12, 4), "int8", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (8, 12), "int32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:8, 0:12], A[0:k, 0:8, 0:4], B[0:k, 0:12, 0:4])
+        T.writes(C[0:8, 0:12])
+        for ko in T.serial(0, k):
+            for i in T.serial(0, 8):
+                for j in T.serial(0, 12):
+                    for ki in T.serial(0, 4):
+                        with T.block("update"):
+                            vko, vi, vj, vki = T.axis.remap("RSSR", [ko, i, j, ki])
+                            C[vi, vj] = C[vi, vj] + T.cast(A[vko, vi, vki], "int32") * T.cast(B[vko, vj, vki], "int32")
+
+
+@T.prim_func
+def dot_product_8x12x16_i8i8i32_microkernel(
+    a: T.handle, b: T.handle, c: T.handle, k: T.int32
+) -> None:
+    A = T.match_buffer(a, (k, 8, 4), "int8", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (k, 12, 4), "int8", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (8, 12), "int32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:8, 0:12], A[0:k, 0:8, 0:4], B[0:k, 0:12, 0:4])
+        T.writes(C[0:8, 0:12])
+        T.evaluate(
+            T.call_extern(
+                "a64_gemm_s8_8x12",
+                A.access_ptr("r"),
+                B.access_ptr("r"),
+                C.access_ptr("w"),
+                k*4,
+                dtype="handle"
+            )
+        )
+        
+
+@T.prim_func
+def dot_product_8x12x16_i8i8i32_fake_microkernel(
+    a: T.handle, b: T.handle, c: T.handle
+) -> None:
+    A = T.match_buffer(a, (8, 4), "int8", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (12, 4), "int8", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (8, 12), "int32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:8, 0:12], A[0:8, 0:4], B[0:12, 0:4])
+        T.writes(C[0:8, 0:12])
+        T.evaluate(
+            T.call_extern(
+                "a64_gemm_s8_8x12",
+                A.access_ptr("r"),
+                B.access_ptr("r"),
+                C.access_ptr("w"),
+                dtype="handle"
+            )
+        )
+
+
+@T.prim_func
+def dot_product_8x12x16_i8i8i32_fake_desc(
+    a: T.handle, b: T.handle, c: T.handle
+) -> None:
+    A = T.match_buffer(a, (8, 4), "int8", offset_factor=1, scope="global")
+    B = T.match_buffer(b, (12, 4), "int8", offset_factor=1, scope="global")
+    C = T.match_buffer(c, (8, 12), "int32", offset_factor=1, scope="global")
+    with T.block("root"):
+        T.reads(C[0:8, 0:12], A[0:8, 0:4], B[ 0:12, 0:4])
+        T.writes(C[0:8, 0:12])
+        for i in T.serial(0, 8):
+            for j in T.serial(0, 12):
+                for ki in T.serial(0, 4):
+                    with T.block("update"):
+                        vi, vj, vki = T.axis.remap("SSR", [i, j, ki])
+                        C[vi, vj] = C[vi, vj] + T.cast(A[vi, vki], "int32") * T.cast(B[vj, vki], "int32")
+
+
 ARM_DOT_4x4_i8_NEON_INTRIN = "dot_4x4_i8i8s32_neon"
 ARM_DOT_4x4_i8_SDOT_INTRIN = "dot_4x4_i8i8s32_sdot"
 ARM_DOT_12x8_fp32_MICROKERNEL_INTRIN = "dot_12x8_f32f32f32_microkernel"
-
+ARM_DOT_8x12_i8_MICROKERNEL_INTRIN = "dot_8x12_i8i8i32_microkernel"
+ARM_DOT_8x12x4_i8_MICROKERNEL_INTRIN = "dot_8x12x4_i8i8i32_microkernel"
+ARM_DOT_8x12x16_i8_MICROKERNEL_INTRIN = "dot_8x12x16_i8i8i32_microkernel"
+ARM_DOT_8x12x16_i8_FAKE_MICROKERNEL_INTRIN = "dot_8x12x16_i8i8i32_fake_microkernel"
 
 TensorIntrin.register(
     ARM_DOT_4x4_i8_NEON_INTRIN, dot_product_4x4_i8i8i32_desc, dot_product_4x4_i8i8i32_neon
@@ -182,4 +361,20 @@ TensorIntrin.register(
 
 TensorIntrin.register(
     ARM_DOT_12x8_fp32_MICROKERNEL_INTRIN, dot_product_12x8_f32f32f32_desc, dot_product_12x8_f32f32f32_microkernel
+)
+
+TensorIntrin.register(
+    ARM_DOT_8x12_i8_MICROKERNEL_INTRIN, dot_product_8x12_i8i8i32_desc, dot_product_8x12_i8i8i32_microkernel
+)
+
+TensorIntrin.register(
+    ARM_DOT_8x12x4_i8_MICROKERNEL_INTRIN, dot_product_8x12x4_i8i8i32_desc, dot_product_8x12x4_i8i8i32_microkernel
+)
+
+TensorIntrin.register(
+    ARM_DOT_8x12x16_i8_MICROKERNEL_INTRIN, dot_product_8x12x16_i8i8i32_desc, dot_product_8x12x16_i8i8i32_microkernel
+)
+
+TensorIntrin.register(
+    ARM_DOT_8x12x16_i8_FAKE_MICROKERNEL_INTRIN, dot_product_8x12x16_i8i8i32_fake_desc, dot_product_8x12x16_i8i8i32_fake_microkernel
 )

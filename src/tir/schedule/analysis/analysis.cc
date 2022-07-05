@@ -1302,10 +1302,12 @@ Optional<LayoutInfo> GetTensorizeLayoutInfo(const tir::ScheduleState& self,
   AutoTensorizeExtractor extractor;
   MappingProposer proposer(&extractor);
   if (!extractor.VisitStmt(block->block, desc_block->block)) {
+    LOG(INFO)<<"fail extractor";
     return NullOpt;
   }
   proposer.Propose();
   if (proposer.mappings_.empty()) {
+    LOG(INFO)<<"fail prposer";
     return NullOpt;
   }
   ObjectPtr<LayoutInfoNode> ret = make_object<LayoutInfoNode>();
@@ -2567,6 +2569,9 @@ Optional<TensorizeInfo> GetTensorizeLoopMapping(const tir::ScheduleState& self,
 
       // Check divisibility
       if (int_block_extent) {
+        if (int_block_extent->value == 1) {
+          return NullOpt;
+        }
         if (int_block_extent->value % int_desc_extent->value != 0) {
          padding[next_block_ind + 1] = (int_block_extent->value + int_desc_extent->value - 1) / int_desc_extent->value * int_desc_extent->value;
         }

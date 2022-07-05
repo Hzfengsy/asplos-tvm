@@ -78,12 +78,12 @@ TensorIntrin::TensorIntrin(PrimFunc desc, PrimFunc impl) {
   CHECK_EQ(desc->params.size(), impl->params.size())
       << "ValueError: The number of parameters of the description and the implementation of the "
          "tensor intrinsic doesn't match.";
-  for (size_t i = 0; i < desc->params.size(); i++) {
-    CHECK(desc->params[i]->dtype.is_handle()) << "ValueError: Parameters of the description of the "
-                                                 "tensor intrinsic should be handle only.";
-    CHECK(impl->params[i]->dtype.is_handle()) << "ValueError: Parameters of the implementation of "
-                                                 "the tensor intrinsic should be handle only.";
-  }
+  // for (size_t i = 0; i < desc->params.size(); i++) {
+  //   CHECK(desc->params[i]->dtype.is_handle()) << "ValueError: Parameters of the description of the "
+  //                                                "tensor intrinsic should be handle only.";
+  //   CHECK(impl->params[i]->dtype.is_handle()) << "ValueError: Parameters of the implementation of "
+  //                                                "the tensor intrinsic should be handle only.";
+  // }
   ICHECK_EQ(desc->buffer_map.size(), impl->buffer_map.size());
 
   ObjectPtr<TensorIntrinNode> n = make_object<TensorIntrinNode>();

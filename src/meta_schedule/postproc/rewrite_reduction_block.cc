@@ -131,8 +131,11 @@ bool RewriteReductionBlockNode::Apply(const tir::Schedule& sch) {
       const tir::StmtSRef& block_sref = kv.first;
       const String& global_var_name = kv.second;
       int decompose_point = tir::FindDecomposePoint(block_sref);
-      if (decompose_point == -1) {
+      if (decompose_point == 0) {
         continue;
+      }
+      if(decompose_point==-1){
+        decompose_point=0;
       }
       tir::BlockRV block_rv = GetRVFromSRef(sch, block_sref, global_var_name);
       Array<tir::LoopRV> loop_rvs = sch->GetLoops(block_rv);
