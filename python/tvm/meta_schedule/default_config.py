@@ -25,7 +25,8 @@ from tvm.ir import IRModule
 from tvm.target import Target
 from tvm.tir import PrimFunc
 from tvm.tir.tensor_intrin import ARM_DOT_4x4_i8_SDOT_INTRIN as ARM_DOT_INTRIN
-from tvm.tir.tensor_intrin import ARM_DOT_12x8_fp32_MICROKERNEL_INTRIN as ARM_MICROKERNEL_INTRIN
+from tvm.tir.tensor_intrin import ARM_DOT_8x12x16_i8_MICROKERNEL_INTRIN as ARM_MICROKERNEL_INTRIN
+from tvm.tir.tensor_intrin import ARM_DOT_8x12x16_i8_FAKE_MICROKERNEL_INTRIN 
 from tvm.meta_schedule.testing.kernel import gemm_impl
 from .builder import Builder, LocalBuilder
 from .cost_model import CostModel, XGBModel
@@ -434,7 +435,7 @@ class _ARM_MicroKernel():
                 ),
                 reuse_write=M.ReuseType(
                     req="must",
-                    levels=[1, 2],
+                    levels=[4],
                     scope="global",
                 ),
             ),
@@ -449,7 +450,7 @@ class _ARM_MicroKernel():
             ),
             M.ParallelizeVectorizeUnroll(
                 max_jobs_per_core=16,
-                max_vectorize_extent=64,
+                max_vectorize_extent=128,
                 unroll_max_steps=[0, 16, 64, 512],
                 unroll_explicit=True,
             ),

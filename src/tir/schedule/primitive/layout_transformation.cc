@@ -207,6 +207,7 @@ IterVarType DetectNewBlockIterType(
     const PrimExpr& expr,
     const std::unordered_map<const VarNode*, IterVarType>& block_iter_type_map) {
   IterVarType result{kOpaque};
+  //LOG(INFO)<<expr;
   bool found = false;
   PostOrderVisit(expr, [&](const ObjectRef& obj) {
     if (const VarNode* var = obj.as<VarNode>()) {
@@ -368,7 +369,7 @@ void TransformBlockLayout(ScheduleState self, const StmtSRef& block_sref,
   }
 
   BlockRealize block_realize = GetBlockRealize(self, block_sref);
-  NotTrivialBindingError::CheckBlockHasTrivialBinding(self->mod, block_realize, loop_vars);
+  // NotTrivialBindingError::CheckBlockHasTrivialBinding(self->mod, block_realize, loop_vars);
 
   // Step 3: Collect information of block iter vars
   Array<PrimExpr> block_vars;      // iter_var->var of each block iter
@@ -408,7 +409,7 @@ void TransformBlockLayout(ScheduleState self, const StmtSRef& block_sref,
     Var new_block_var{"v" + std::to_string(i), DataType::Int(32)};
     new_block_vars.push_back(new_block_var);
     IterVarType iter_type = DetectNewBlockIterType(transformed_block_iters[i], block_iter_type);
-    if (iter_type == kOpaque) {
+    if (iter_type == kOpaque && !is_one(new_block_iter_range[i])) {
       throw OpaqueNewIterTypeError(self->mod, GetRef<Block>(block_ptr), transformed_block_iters[i]);
     }
     new_block_iters.push_back(IterVar(/*dom=*/Range::FromMinExtent(0, new_block_iter_range[i]),

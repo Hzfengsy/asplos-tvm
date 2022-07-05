@@ -44,7 +44,9 @@ tir::PrimFunc AnnotateOpPattern(tir::PrimFunc f) {
       kind = relay::kCommReduce;
     } else if (func_name.find("dense")!=std::string::npos){
       kind= relay::kOutEWiseFusable;
-    }
+    } else if (func_name.find("pad")!=std::string::npos){
+      kind= relay::kElemWise;
+    } 
     else {
       kind = AnalyzeOpPatternKind(f);
     }

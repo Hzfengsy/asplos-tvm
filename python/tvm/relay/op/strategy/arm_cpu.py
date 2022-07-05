@@ -89,6 +89,13 @@ def conv2d_strategy_arm_cpu(attrs, inputs, out_type, target):
     if groups == 1:
         if layout == "NCHW":
             if kernel_layout == "OIHW":
+                if is_auto_scheduler_enabled():
+                    strategy.add_implementation(
+                        wrap_compute_conv2d(topi.nn.conv2d_nchw),
+                        naive_schedule,
+                        name="conv2d_nchw_int8.arm_cpu",
+                        plevel=20,
+                    )
                 if (
                     topi.arm_cpu.is_int8_hw_support(data.dtype, kernel.dtype)
                     and kernel.shape[1] >= 64

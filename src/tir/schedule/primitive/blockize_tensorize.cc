@@ -459,7 +459,10 @@ BlockRealize GenerateBlockizedOuterBlock(const BlockizedBindingExtractor& extrac
                             /*writes=*/std::move(new_writes),                    //
                             /*name_hint=*/block->name_hint + "_o",               //
                             /*body=*/std::move(outer_block_body),                //
-                            /*init=*/std::move(new_init)));
+                            /*init=*/std::move(new_init),                        //
+                            /*alloc_buffers=*/{},                                //
+                            /*match_buffers=*/{},                                //
+                            /*annotations=*/{{"inner_block", inner_block_realize->block->name_hint}}  ));
 }
 
 StmtSRef Blockize(ScheduleState self, const StmtSRef& loop_sref) {
@@ -549,7 +552,7 @@ void RemapTensorIntrinBuffers(
     const TensorIntrin& intrinsic,
     std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual>* buffer_map) {
   ICHECK_EQ(intrinsic->desc->params.size(), intrinsic->impl->params.size());
-  for (size_t i = 0; i < intrinsic->desc->params.size(); ++i) {
+  for (size_t i = 0; i < intrinsic->desc->buffer_map.size(); ++i) {
     const Var& lhs_var = intrinsic->desc->params[i];
     const Buffer& lhs_buffer = intrinsic->desc->buffer_map[lhs_var];
     const Var& rhs_var = intrinsic->impl->params[i];
@@ -572,9 +575,7 @@ void Tensorize(ScheduleState self, const StmtSRef& block_or_loop_sref,
    *     buffers created via match buffer region.
    *   - Replace the sub tree with the mutated function.
    */
-  const BlockRealize& desc_block_realize = Downcast<BlockRealize>(intrinsic->desc->body);
-  const BlockRealize& impl_block_realize = Downcast<BlockRealize>(intrinsic->impl->body);
-  Block impl_block = impl_block_realize->block;
+
 
   // Step 1: Blockize the subtree rooted at the given loop if needed
   StmtSRef block_sref{nullptr};
@@ -586,6 +587,20 @@ void Tensorize(ScheduleState self, const StmtSRef& block_or_loop_sref,
   }
   const BlockRealize& block_realize = GetBlockRealize(self, block_sref);
 
+  PrimExpr k = block_realize->block->body.as<ForNode>()->extent;
+  PrimFunc desc_func = intrinsic->desc;
+  Map<Var, ObjectRef> specialize_map;
+  specialize_map.Set(desc_func->params.back(), k);
+  desc_func = Specialize(desc_func, specialize_map);
+  specialize_map.clear();
+  PrimFunc impl_func = intrinsic->impl;
+  specialize_map.Set(impl_func->params.back(), k);
+  impl_func = Specialize(impl_func, specialize_map);
+  TensorIntrin new_intrinsic(desc_func, impl_func);
+  const BlockRealize& desc_block_realize = Downcast<BlockRealize>(desc_func->body);
+  const BlockRealize& impl_block_realize = Downcast<BlockRealize>(impl_func->body);
+  Block impl_block = impl_block_realize->block;
+
   // Step 2: Compare the block with the desc of the tensor intrinsic, find the correspondence
   // between buffers in the block and the desc.
   TensorizeComparator comparator(self->mod, /*assert_mode=*/true);
@@ -595,7 +610,7 @@ void Tensorize(ScheduleState self, const StmtSRef& block_or_loop_sref,
   // the tensor intrinsic
   // Step 3.1: Map from intrinsic func buffer to desc func buffer
   std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> intrin_buffer_map;
-  RemapTensorIntrinBuffers(intrinsic, &intrin_buffer_map);
+  RemapTensorIntrinBuffers(new_intrinsic, &intrin_buffer_map);
   // Step 3.2: Map form intrinsic func buffer to current AST buffer
   std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> buffer_map;
   for (const auto& pair : intrin_buffer_map) {
@@ -614,10 +629,10 @@ void Tensorize(ScheduleState self, const StmtSRef& block_or_loop_sref,
     buffer_region_map.emplace(write->buffer, write->region);
   }
   Array<MatchBufferRegion> match_buffer_regions;
-  match_buffer_regions.reserve(intrinsic->impl->params.size());
-  for (size_t i = 0; i < intrinsic->impl->params.size(); ++i) {
-    const auto& param = intrinsic->impl->params[i];
-    const auto& buffer = intrinsic->impl->buffer_map.at(param);
+  match_buffer_regions.reserve(new_intrinsic->impl->params.size());
+  for (size_t i = 0; i < new_intrinsic->impl->params.size(); ++i) {
+    const auto& param = new_intrinsic->impl->params[i];
+    const auto& buffer = new_intrinsic->impl->buffer_map.at(param);
     const auto& source = buffer_map.at(buffer);
     // add the detected base indices to each buffer access region of the tensor intrinsic
     Region old_region = buffer_region_map.at(buffer);

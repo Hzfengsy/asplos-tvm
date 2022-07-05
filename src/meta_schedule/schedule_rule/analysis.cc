@@ -38,7 +38,7 @@ std::vector<int> GetReadBufferNDims(const StmtSRef& block_sref) {
 Optional<LoopRV> TilingwithTensorIntrin(const Schedule& sch, const BlockRV& block_rv,
                                         const String& intrin_name) {
   Optional<tir::TensorizeInfo> opt_tensorize_info = GetTensorizeLoopMapping(
-      sch->state(), sch->GetSRef(block_rv), tir::TensorIntrin::Get(intrin_name)->desc);
+      sch->state(), sch->GetSRef(block_rv), tir::TensorIntrin::Get("dot_8x12x16_i8i8i32_fake_microkernel")->desc);
   if (!opt_tensorize_info) return NullOpt;
   const tir::TensorizeInfoNode* info = opt_tensorize_info.value().get();
   // Padding if needed
@@ -87,6 +87,7 @@ Optional<LoopRV> TilingwithTensorIntrin(const Schedule& sch, const BlockRV& bloc
   std::vector<LoopRV> reorder_list;
   bool meet = false;
   Array<LoopRV> all_loops = sch->GetLoops(block_rv);
+  LoopRV ret;
   for (const LoopRV& loop : all_loops) {
     if (inner_loops.count(sch->GetSRef(loop).operator->())) {
       meet = true;
@@ -94,25 +95,41 @@ Optional<LoopRV> TilingwithTensorIntrin(const Schedule& sch, const BlockRV& bloc
       reorder_list.push_back(loop);
     }
   }
+  ret = reorder_list.back();
   reorder_list.insert(reorder_list.end(), reorder_suffix.begin(), reorder_suffix.end());
   sch->Reorder(reorder_list);
+  const StmtSRef& loop_sref = sch->GetSRef(ret);
+  const ForNode* loop = TVM_SREF_TO_FOR(loop, loop_sref);
+  const IntImmNode* extent = loop->extent.as<IntImmNode>();
+  ICHECK(extent != nullptr);
+  // if (extent->value <= 128) {
+    ret = sch->Split(ret, {Integer(1), NullOpt})[1];
+  // } else {
+  //   int factor = 128;
+  //   for (; factor >= 1 && extent->value % factor != 0; factor--);
+  //   ret = sch->Split(ret, {Integer(extent->value / factor), Integer(factor)})[1];
+  // }
   ICHECK(!reorder_suffix.empty());
-  return reorder_suffix[0];
+  return ret;
 }
-
 
 Optional<LoopRV> TransformWithTensorIntrin(const tir::Schedule& sch, const tir::BlockRV&
                                                                          block_rv, const String&
-                                               intrin_name, Array<BlockRV>* reindex_block_rvs) {
+                                               intrin_name, Array<BlockRV>* reindex_block_rvs) {  
   Optional<tir::LayoutInfo> opt_layout_info =
       GetTensorizeLayoutInfo(sch->state(), sch->GetSRef(block_rv),
-                             tir::TensorIntrin::Get(intrin_name)->desc);
+                             tir::TensorIntrin::Get("dot_8x12x16_i8i8i32_fake_microkernel")->desc);
   ICHECK(opt_layout_info.defined());
   if (!opt_layout_info) return NullOpt;
   const tir::LayoutInfoNode* info = opt_layout_info.value().get();
   
   tir::StmtSRef block_sref = sch->GetSRef(block_rv);
   const tir::BlockNode* block = TVM_SREF_TO_BLOCK(block, block_sref);
+  // for (int i = block->iter_vars.size() - 3; i < block->iter_vars.size(); i++){ 
+  //   if (is_one(block->iter_vars[i]->dom->extent)) {
+  //     return NullOpt;
+  //   }
+  // }
   // collect the buffers
   std::unordered_map<tir::Buffer, std::pair<size_t, bool>, ObjectPtrHash, ObjectEqual> buffers;
   for (size_t i = 0; i < block->reads.size(); ++i) {

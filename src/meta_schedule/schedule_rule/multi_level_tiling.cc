@@ -115,6 +115,15 @@ std::vector<State> MultiLevelTilingNode::AddWriteReuse(State state) const {
   // Case 3. Add one write cache
   BlockRV write_cache = state.sch->CacheWrite(/*block_rv=*/state.block_rv, /*read_buffer_index=*/0,
                                               /*storage_scope=*/config.scope);
+  if(state.reindex_store.defined()){
+    tir::Var vi("i");
+    tir::Var vj("j");
+    Array<tir::Var> initial_indices = {vi, vj};
+    Array<PrimExpr> final_indices = {floordiv(vi, 8), floordiv(vj, 12),
+      floormod(vi, 8), floormod(vj, 12)};
+    tir::IndexMap index_map(initial_indices, final_indices);
+    state.sch->TransformLayout(write_cache, 0, tir::BufferIndexType::kRead, index_map);
+  }
   for (int level : config.levels) {
     State new_state = state;
     new_state.sch = state.sch->Copy();
@@ -228,9 +237,18 @@ std::vector<State> MultiLevelTilingNode::AddReadReuse(State state) const {
         }
       } else {
         cache_read_block = sch->CacheRead(block_rv, i, config.scope);
+        if(state.reindex_A.defined()){
+          tir::Var vi("i");
+          tir::Var vk("k");
+          Array<tir::Var> initial_indices = {vi, vk};
+          Array<PrimExpr> final_indices = {floordiv(vi, (i==0)?8:12), floordiv(vk, 4),
+          floormod(vi, (i==0)?8:12), floormod(vk, 4)};
+          tir::IndexMap index_map(initial_indices, final_indices);
+          sch->TransformLayout(cache_read_block, 0, tir::BufferIndexType::kWrite, index_map);
+          sch->TransformBlockLayout(cache_read_block, index_map);
+        }
         // Insert cache_read block to the proper place
-        sch->ComputeAt(cache_read_block, loop_rv, true);
-
+        // sch->ComputeAt(cache_read_block, loop_rv, true);
         // Annotate cooperative fetching
         if (!vector_load_lens.empty()) {
           // Fuse the iterators of the cache_read
@@ -251,17 +269,17 @@ std::vector<State> MultiLevelTilingNode::AddReadReuse(State state) const {
     new_state.sch = sch;
     if (new_state.tensor_core_is_used) new_state = TensorCoreLoad(new_state);
     // add software pipeline annotations
-    tir::For loop = new_state.sch->Get(loop_rv);
-    Array<Integer> stage;
-    Array<Integer> order;
-    if (tir::IsCacheReadSharedPattern(loop)) {
-      stage = {0, 0, 0, 0, 0, 1, 1};
-      order = {0, 3, 1, 4, 5, 2, 6};
-    } else {
-      tir::FallbackRule(loop, &stage, &order);
-    }
-    new_state.sch->Annotate(loop_rv, tir::attr::software_pipeline_stage, stage);
-    new_state.sch->Annotate(loop_rv, tir::attr::software_pipeline_order, order);
+    // tir::For loop = new_state.sch->Get(loop_rv);
+    // Array<Integer> stage;
+    // Array<Integer> order;
+    // if (tir::IsCacheReadSharedPattern(loop)) {
+    //   stage = {0, 0, 0, 0, 0, 1, 1};
+    //   order = {0, 3, 1, 4, 5, 2, 6};
+    // } else {
+    //   tir::FallbackRule(loop, &stage, &order);
+    // }
+    // new_state.sch->Annotate(loop_rv, tir::attr::software_pipeline_stage, stage);
+    // new_state.sch->Annotate(loop_rv, tir::attr::software_pipeline_order, order);
     results.push_back(std::move(new_state));
   }
   return results;
