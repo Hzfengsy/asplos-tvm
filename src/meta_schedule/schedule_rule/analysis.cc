@@ -43,6 +43,7 @@ Optional<LoopRV> TilingwithTensorIntrin(const Schedule& sch, const BlockRV& bloc
   const tir::TensorizeInfoNode* info = opt_tensorize_info.value().get();
   // Padding if needed
   if (info->padding.defined()) {
+    // LOG(INFO)<<tir::AsTVMScript(sch->mod());
     sch->PaddingEinSum(block_rv, info->padding.value());
   }
   // Construct a mapping from tir loops back to LoopRVs
@@ -198,6 +199,9 @@ Optional<LoopRV> TransformWithTensorIntrin(const tir::Schedule& sch, const tir::
   sch->TransformBlockLayout(reindex_A, info->mapping);
   sch->TransformBlockLayout(reindex_B, info->mapping);
   sch->TransformBlockLayout(block_rv, info->mapping);
+  LOG(INFO)<<tir::AsTVMScript(sch->mod());
+
+  LOG(INFO)<<info->mapping;
   
   Array<LoopRV> loops = sch->GetLoops(block_rv);
   return loops[loops.size() - info->rhs_iters.size()];

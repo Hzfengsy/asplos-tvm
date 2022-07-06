@@ -80,7 +80,6 @@ class MultiLevelTilingWithIntrinNode : public MultiLevelTilingNode {
     states= MultiLevelTilingNode::ApplySubRules(states);
     states = SubRule(std::move(states), [&](State state) {
       if(state.reindex_store.defined()){
-        // state.sch->ReverseComputeInline(state.reindex_store.value());
         state.sch->ComputeInline(state.reindex_A.value());
         state.sch->ComputeInline(state.reindex_B.value());
       }

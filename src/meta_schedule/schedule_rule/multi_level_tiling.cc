@@ -131,6 +131,9 @@ std::vector<State> MultiLevelTilingNode::AddWriteReuse(State state) const {
     ICHECK(!new_state.tensor_core_is_used) << "not supported"; // FIXME
     const LoopRV& loop_rv = new_state.tiles[level - 1].back();
     new_state.sch->ReverseComputeAt(write_cache, loop_rv, true);
+    if(new_state.reindex_store.defined()){
+      new_state.sch->ReverseComputeAt(new_state.reindex_store.value(), loop_rv, true);
+    }
     results.push_back(std::move(new_state));
   }
   return results;

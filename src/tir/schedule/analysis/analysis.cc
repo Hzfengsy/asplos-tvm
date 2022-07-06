@@ -2544,6 +2544,8 @@ Optional<TensorizeInfo> GetTensorizeLoopMapping(const tir::ScheduleState& self,
         next_block_ind = i - 1;
         block_bind = block->iter_values[i];
         break;
+      } else {
+        return NullOpt;
       }
     }
     if (!block_bind.defined()) return NullOpt;
