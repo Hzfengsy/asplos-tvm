@@ -43,6 +43,7 @@ static CreateLocalStage create_local_stage;
 static SharedToWmma shared_to_wmma;
 static WmmaToGlobal wmma_to_global;
 static WmmaToShared wmma_to_shared;
+static MmaToGlobal mma_to_global;
 
 /*!
  * \brief A class to perform auto padding.
@@ -669,7 +670,7 @@ class AutoCopyMutator : public StmtExprMutator {
     if (block->reads.size() > 1) {
       bool found = false;
       for (size_t i = 0; i < block->reads.size(); i++) {
-        if (block->reads[i]->buffer.scope() == "wmma.accumulator") {
+        if (block->reads[i]->buffer.scope() == "wmma.accumulator" || block->reads[i]->buffer.scope() == "m16n8k8.matrixC") {
           found = true;
           target_read = block->reads[i];
         }
@@ -716,13 +717,14 @@ class AutoCopyMutator : public StmtExprMutator {
   AutoPadder padder;
 
   /*! \brief All rewrite rules. */
-  const std::array<RewriteRule*, 6> rules = {
+  const std::array<RewriteRule*, 7> rules = {
       &inverse_mapping,     //
       &coalesced_access,    //
       &create_local_stage,  //
       &shared_to_wmma,      //
       &wmma_to_global,      //
-      &wmma_to_shared,
+      &wmma_to_shared,      //
+      &mma_to_global,
   };
 };
 

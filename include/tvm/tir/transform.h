@@ -658,6 +658,11 @@ TVM_DLL Pass Filter(runtime::TypedPackedFunc<bool(PrimFunc)> fcond);
  */
 TVM_DLL Pass InjectPTXAsyncCopy();
 
+/*!
+ * \brief 
+ */
+TVM_DLL Pass LowerOperandBuffer();
+
 }  // namespace transform
 }  // namespace tir
 }  // namespace tvm
