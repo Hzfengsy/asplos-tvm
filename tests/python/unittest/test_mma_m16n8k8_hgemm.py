@@ -376,22 +376,6 @@ sch.annotate(block_or_loop=b24, ann_key="warp_execution", ann_val=1)
 
 num_ty = i_factors[2] * j_factors[2]
 def fetch_to_shared(block, idx, ndim):
-    # shared [128 x 32]
-    # block_read = sch.cache_read(block, idx, "shared")
-    # # block_read_local = sch.cache_read(block_read, 0, "local")
-    # sch.compute_at(block_read, k0)
-    # vector_size = 8
-    # warp_size = 32
-    # fused = sch.fuse(*sch.get_loops(block_read)[-ndim:])
-    # f_0, f_1, f_2, f_3 = sch.split(fused, factors=[None, num_ty, warp_size, vector_size])
-    # # sch.reorder(f_1, f_2, f_0, f_3)
-    # sch.bind(f_2, 'threadIdx.x')
-    # sch.bind(f_1, 'threadIdx.y')
-    # # sch.bind(f_0, 'vthread.z')
-    # # sch.compute_at(block_read_local, f_2)
-    # sch.vectorize(f_3)
-    # sch.storage_align(block_read, 0, axis=-2, factor=32, offset=8)
-
     vector_size = 16
     block_read = sch.read_at(k0, block, idx, "shared.dyn")
     sch.annotate(block_or_loop=block_read, ann_key="vector_bytes", ann_val=vector_size)
@@ -430,10 +414,10 @@ sch.tensorize(l01, "m16n8k8_load_B_row_major")
 
 block_write_c = sch.write_at(thread_idy, block_outer, 0, "m16n8k8.matrixC")
 
-sch.annotate(block_or_loop=k1, ann_key="software_pipeline_stage", ann_val=[0, 0, 1])
-sch.annotate(block_or_loop=k1, ann_key="software_pipeline_order", ann_val=[0, 1, 2])
-sch.annotate(block_or_loop=k0, ann_key="software_pipeline_stage", ann_val=[0, 0, 0, 0, 0, 1, 1])
-sch.annotate(block_or_loop=k0, ann_key="software_pipeline_order", ann_val=[0, 3, 1, 4, 5, 2, 6])
+# sch.annotate(block_or_loop=k1, ann_key="software_pipeline_stage", ann_val=[0, 0, 1])
+# sch.annotate(block_or_loop=k1, ann_key="software_pipeline_order", ann_val=[0, 1, 2])
+# sch.annotate(block_or_loop=k0, ann_key="software_pipeline_stage", ann_val=[0, 0, 0, 0, 0, 1, 1])
+# sch.annotate(block_or_loop=k0, ann_key="software_pipeline_order", ann_val=[0, 3, 1, 4, 5, 2, 6])
 
 # Step 3.3. Decompose
 loop = sch.get_loops(block_outer)[3]
@@ -450,11 +434,3 @@ sch.tensorize(l1, "m16n8k8_init")
 print(sch.mod.script())
 print(tvm.lower(sch.mod).script())
 exit()
-
-# loop = tile_wmma_fragment(block_read_a)
-# sch.tensorize(loop, "wmma_load_a")
-# loop = tile_wmma_fragment(block_read_b)
-# sch.tensorize(loop, "wmma_load_b")
-
-# loop = sch.get_loops(block_write_c)[-2]
-# sch.tensorize(loop, "wmma_store")
