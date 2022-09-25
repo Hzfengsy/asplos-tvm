@@ -49,18 +49,19 @@ class OperandBufferLayoutTransformer : public StmtExprMutator {
         const IntImmNode* dim0 = buffer->shape[size - 2].as<IntImmNode>();
         const IntImmNode* dim1 = buffer->shape[size - 1].as<IntImmNode>();
         ICHECK(dim0 != nullptr && dim1 != nullptr);
-        ICHECK(dim0->value % 8 == 0 && dim1->value % 8 == 0);
+        ICHECK(dim0->value % 16 == 0 && dim1->value % 8 == 0);
 
         std::vector<PrimExpr> new_shape;
         for (size_t i = 0; i < size - 2; ++i) {
           new_shape.push_back(buffer->shape[i]);
         }
         new_shape.insert(new_shape.end(), {
-          Integer(dim0->value / 8), Integer(dim1->value / 8), 2
+          Integer(dim0->value / 16), Integer(dim1->value / 8), 2, 2
         });
 
         Buffer new_buffer = decl_buffer(std::move(new_shape), buffer->dtype, buffer->name, "local", buffer->axis_separators);
         this->buffer_map_.insert({buffer, new_buffer});
+        this->buffer_var_map_.insert({buffer->data, new_buffer->data});
         return std::move(new_buffer);
       } else if (buffer.scope() == "m16n8k8.matrixA") {
         // m16n8k8.matrixA
@@ -80,6 +81,7 @@ class OperandBufferLayoutTransformer : public StmtExprMutator {
 
         Buffer new_buffer = decl_buffer(std::move(new_shape), buffer->dtype, buffer->name, "local", buffer->axis_separators);
         this->buffer_map_.insert({buffer, new_buffer});
+        this->buffer_var_map_.insert({buffer->data, new_buffer->data});
         return std::move(new_buffer);
       } else if (buffer.scope() == "m16n8k8.matrixB") {
         // m16n8k8.matrixB
@@ -99,6 +101,7 @@ class OperandBufferLayoutTransformer : public StmtExprMutator {
 
         Buffer new_buffer = decl_buffer(std::move(new_shape), buffer->dtype, buffer->name, "local", buffer->axis_separators);
         this->buffer_map_.insert({buffer, new_buffer});
+        this->buffer_var_map_.insert({buffer->data, new_buffer->data});
         return std::move(new_buffer);
       }
       return buffer;
@@ -144,8 +147,16 @@ class OperandBufferLayoutTransformer : public StmtExprMutator {
     return std::move(load);
   }
 
+  PrimExpr VisitExpr_(const VarNode* op) {
+    if (buffer_var_map_.count(GetRef<Var>(op))) {
+      return buffer_var_map_[GetRef<Var>(op)];
+    }
+    return GetRef<Var>(op);
+  }
+
  private:
   std::unordered_map<Buffer, Buffer, ObjectPtrHash, ObjectPtrEqual> buffer_map_;
+  std::unordered_map<Var, Var, ObjectPtrHash, ObjectPtrEqual> buffer_var_map_;
   arith::Analyzer analyzer;
 };
 

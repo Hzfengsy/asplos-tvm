@@ -1,3 +1,5 @@
+import numpy as np
+
 import tvm
 import tvm.testing
 from tvm import te
@@ -7,6 +9,7 @@ from tvm._ffi import register_func
 from tvm import tir
 from tvm.script import tir as T
 from tvm.runtime import convert
+from tvm.contrib import cublas
 
 VEC_SIZE = 8
 
@@ -37,8 +40,7 @@ def get_index_C(elem_offset, stride):
     stride_b = stride // 8
     bi = i // 8
     bj = j // 8
-    no = bi * stride_b + bj
-    return no * 2
+    return ((bi // 2) * 2 * stride_b + bi % 2 + bj * 2)
 
 
 @T.prim_func
@@ -144,7 +146,7 @@ def m16n8k8_load_B_row_major_impl(a: T.handle, c: T.handle) -> None:
                     dst.data,
                     get_index_B(dst.elem_offset, d0),
                     src.access_ptr("r"),
-                    s0 * (tx % 4) + 8 * (tx // 4),
+                    s0 * (tx % 8) + 8 * (tx // 8),
                     dtype="float16"
                 )
         )
@@ -295,7 +297,7 @@ tir.TensorIntrin.register("m16n8k8_init", m16n8k8_init_desc, m16n8k8_init_impl)
 @register_func("tir.index_map_m16n8k8.matrixC")
 def index_map_m16n8k8_matrixC(ind):
     i, j = ind[0], ind[1]
-    return convert([i // 8, j // 8, (j % 8) % 2])
+    return convert([(i // 8) // 2, j // 8, (i // 8) % 2, (j % 8) % 2])
 
 
 def matmul_fp16(  # pylint: disable=invalid-name,missing-docstring
@@ -414,10 +416,10 @@ sch.tensorize(l01, "m16n8k8_load_B_row_major")
 
 block_write_c = sch.write_at(thread_idy, block_outer, 0, "m16n8k8.matrixC")
 
-# sch.annotate(block_or_loop=k1, ann_key="software_pipeline_stage", ann_val=[0, 0, 1])
-# sch.annotate(block_or_loop=k1, ann_key="software_pipeline_order", ann_val=[0, 1, 2])
-# sch.annotate(block_or_loop=k0, ann_key="software_pipeline_stage", ann_val=[0, 0, 0, 0, 0, 1, 1])
-# sch.annotate(block_or_loop=k0, ann_key="software_pipeline_order", ann_val=[0, 3, 1, 4, 5, 2, 6])
+sch.annotate(block_or_loop=k1, ann_key="software_pipeline_stage", ann_val=[0, 0, 1])
+sch.annotate(block_or_loop=k1, ann_key="software_pipeline_order", ann_val=[0, 1, 2])
+sch.annotate(block_or_loop=k0, ann_key="software_pipeline_stage", ann_val=[0, 0, 0, 0, 0, 1, 1])
+sch.annotate(block_or_loop=k0, ann_key="software_pipeline_order", ann_val=[0, 3, 1, 4, 5, 2, 6])
 
 # Step 3.3. Decompose
 loop = sch.get_loops(block_outer)[3]
@@ -431,6 +433,46 @@ loop = sch.get_loops(block_init_c_inner)[-2]
 l0, l1 = sch.split(loop, [None, 8])
 sch.tensorize(l1, "m16n8k8_init")
 
-print(sch.mod.script())
-print(tvm.lower(sch.mod).script())
-exit()
+# print(sch.mod.script())
+# print(tvm.lower(sch.mod).script())
+
+target = tvm.target.Target("nvidia/geforce-rtx-3090")
+f = tvm.build(sch.mod, target=target)
+print(f.imported_modules[0].get_source())
+
+np.random.seed(913)
+
+m = 4096
+n = 4096
+k = 4096
+
+dev = tvm.device("cuda", 0)
+a_np = np.random.uniform(0, 1, size=(m, k)).astype("float32")
+b_np = np.random.uniform(0, 1, size=(k, n)).astype("float32")
+
+a = tvm.nd.array(a_np.astype("float16"), device=dev)
+b = tvm.nd.array(b_np.astype("float16"), device=dev)
+c = tvm.nd.array(np.zeros((m, n)).astype("float16"), device=dev)
+
+f(a, b, c)
+
+# cublas
+
+A_cublas = te.placeholder((m, k), name="A", dtype="float16")
+B_cublas = te.placeholder((k, n), name="B", dtype="float16")
+C_cublas = cublas.matmul(A_cublas, B_cublas, dtype="float16")
+s = te.create_schedule(C_cublas.op)
+
+dev = tvm.cuda(0)
+f_cublas = tvm.build(s, [A_cublas, B_cublas, C_cublas], "cuda")
+
+a_cublas = tvm.nd.array(a_np.astype("float16"), dev)
+b_cublas = tvm.nd.array(b_np.astype("float16"), dev)
+c_cublas = tvm.nd.array(np.zeros((m, n), dtype=C_cublas.dtype), dev)
+f_cublas(a_cublas, b_cublas, c_cublas)
+
+tvm.testing.assert_allclose(
+    c_cublas.numpy(),
+    c.asnumpy(),
+    rtol=1e-2,
+)
