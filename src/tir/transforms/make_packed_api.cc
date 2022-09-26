@@ -320,6 +320,9 @@ PrimFunc MakePackedAPI(PrimFunc&& func, int num_unpacked_args) {
   func_ptr->params = args;
 
   Array<Var> undefined = UndefinedVars(func_ptr->body, func_ptr->params);
+
+  
+
   if (undefined.size() != 0) {
     std::ostringstream os;
     for (Var v : undefined) {

@@ -544,5 +544,19 @@ Stmt MmaToGlobal::Rewrite(const Stmt& stmt, const ConstraintSet& constraints,
   return rewriter(body);
 }
 
+class PermuteSharedMemoryRewriter : public StmtExprMutator {
+ public:
+  Stmt VisitStmt_(const BufferStoreNode* op) final {
+    return StmtMutator::VisitStmt_(op);
+  }
+ private:
+};
+
+Stmt PermuteSharedMemory::Rewrite(const Stmt& stmt, const ConstraintSet& constraints,
+                                  OutputSet* output) const {
+  PermuteSharedMemoryRewriter rewriter;
+  return rewriter(stmt);
+}
+
 }  // namespace tir
 }  // namespace tvm

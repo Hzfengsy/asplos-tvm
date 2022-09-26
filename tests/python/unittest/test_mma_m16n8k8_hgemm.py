@@ -438,7 +438,7 @@ sch.tensorize(l1, "m16n8k8_init")
 
 target = tvm.target.Target("nvidia/geforce-rtx-3090")
 f = tvm.build(sch.mod, target=target)
-print(f.imported_modules[0].get_source())
+# print(f.imported_modules[0].get_source())
 
 np.random.seed(913)
 
@@ -456,7 +456,8 @@ c = tvm.nd.array(np.zeros((m, n)).astype("float16"), device=dev)
 
 f(a, b, c)
 
-# cublas
+time = f.time_evaluator(f.entry_name, dev, number=10)
+print("time: %f ms" % (time(a, b, c).mean * 1000))
 
 A_cublas = te.placeholder((m, k), name="A", dtype="float16")
 B_cublas = te.placeholder((k, n), name="B", dtype="float16")
@@ -474,5 +475,14 @@ f_cublas(a_cublas, b_cublas, c_cublas)
 tvm.testing.assert_allclose(
     c_cublas.numpy(),
     c.asnumpy(),
+    rtol=1e-2,
+)
+
+print(c.asnumpy())
+print(c_cublas.numpy())
+
+tvm.testing.assert_allclose(
+    c.asnumpy(),
+    (a_np @ b_np).astype("float16"),
     rtol=1e-2,
 )

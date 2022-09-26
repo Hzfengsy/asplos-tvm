@@ -115,6 +115,11 @@ inline bool IsCopyBetweenScope(const Buffer& src_buffer, const Buffer& tgt_buffe
   return src_scope.rank == src_rank && tgt_scope.rank == tgt_rank;
 }
 
+inline bool IsScope(const Buffer& src_buffer, runtime::StorageRank src_rank) {
+  runtime::StorageScope src_scope = runtime::StorageScope::Create(src_buffer.scope());
+  return src_scope.rank == src_rank;
+}
+
 /*!
  * \brief Coalesce and vectorize memory access.
  */
@@ -225,6 +230,22 @@ class WmmaToShared : public RewriteRule {
     Buffer tgt_buffer = constraints.write_region->buffer;
     return IsCopyBetweenScope(src_buffer, tgt_buffer, runtime::StorageRank::kWMMAAccumulator,
                               runtime::StorageRank::kShared);
+  }
+};
+
+/*!
+ * \brief Rewrite wmma->shared data copy with store_matrix_sync
+ */
+class PermuteSharedMemory : public RewriteRule {
+ public:
+  PermuteSharedMemory() = default;
+  Stmt Rewrite(const Stmt& stmt, const ConstraintSet& constraints, OutputSet* output) const final;
+  bool CanApply(const Stmt& stmt, const ConstraintSet& constraints) const final {
+    Buffer src_buffer = constraints.read_region->buffer;
+    Buffer tgt_buffer = constraints.write_region->buffer;
+    return IsCopyBetweenScope(src_buffer, tgt_buffer, runtime::StorageRank::kGlobal,
+                              runtime::StorageRank::kShared) || 
+           IsScope(src_buffer, runtime::StorageRank::kShared);
   }
 };
 

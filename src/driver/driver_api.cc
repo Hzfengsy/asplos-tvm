@@ -54,6 +54,7 @@ TVM_REGISTER_PASS_CONFIG_OPTION("tir.add_lower_pass", Array<Array<ObjectRef>>);
 TVM_REGISTER_PASS_CONFIG_OPTION("tir.debug_keep_trivial_loop", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("tir.use_ptx_async_copy", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("tir.predicate_opt", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("tir.inject", Bool);
 
 using runtime::PackedFunc;
 using runtime::TVMArgs;
@@ -202,6 +203,17 @@ Pass Print() {
   return tir::transform::CreatePrimFuncPass(pass_func, 0, "tir.Print", {});
 }
 
+Pass Inject(bool inject) {
+  auto pass_func = [inject](tir::PrimFunc f, IRModule m, transform::PassContext ctx) -> tir::PrimFunc {
+    const auto* func = runtime::Registry::Get("permuted_layout");
+    if (func == nullptr || !inject) {
+      return f;
+    }
+    return (*func)();
+  };
+  return tir::transform::CreatePrimFuncPass(pass_func, 0, "tir.Inject", {});
+}
+
 Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   transform::PassContext pass_ctx = transform::PassContext::Current();
 
@@ -214,6 +226,8 @@ Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   bool enable_equiv_terms_in_cse_tir =
       pass_ctx->GetConfig<Bool>("tir.enable_equiv_terms_in_cse_tir", Bool(false)).value();
   bool predicate_opt = pass_ctx->GetConfig<Bool>("tir.predicate_opt", Bool(false)).value();
+  bool inject = pass_ctx->GetConfig<Bool>("tir.inject", Bool(false)).value();
+  LOG(INFO) << "inject " << inject;
 
   // Get any user-added passes
   Array<Array<ObjectRef>> add_lower_pass =
@@ -264,6 +278,11 @@ Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   pass_list.push_back(tir::transform::ConvertBlocksToOpaque());
   pass_list.push_back(tir::transform::CompactBufferAllocation());
   pass_list.push_back(tir::transform::LowerAutoCopy());
+  pass_list.push_back(tir::transform::Simplify());
+  pass_list.push_back(Print());
+  pass_list.push_back(Inject(inject));
+  // pass_list.push_back(tir::transform::Simplify());
+  // pass_list.push_back(Print());
   pass_list.push_back(tir::transform::UnifyThreadBinding());
   pass_list.push_back(tir::transform::LowerMatchBuffer());
   pass_list.push_back(tir::transform::InjectSoftwarePipeline());
