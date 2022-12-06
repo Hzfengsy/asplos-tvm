@@ -43,7 +43,6 @@ class MetaScheduleAHB {
         ObjectRef res = ahb->Query(gv->name_hint, mod_, target_, Array<IRModule>{tir_mod});
         // replace the tir func only when the schedule is found in tuning database.
         if (res.defined()) {
-          LOG(INFO)<<gv->name_hint;
           IRModule newmod = Downcast<IRModule>(res);
           ICHECK_EQ(newmod->functions.size(), 1);
           newfunc = (*newmod->functions.begin()).second;

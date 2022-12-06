@@ -116,17 +116,17 @@ Optional<LoopRV> TilingwithTensorIntrin(const Schedule& sch, const BlockRV& bloc
 
 Optional<LoopRV> TransformWithTensorIntrin(const tir::Schedule& sch, const tir::BlockRV&
                                                                          block_rv, const String&
-                                               intrin_name, Array<BlockRV>* reindex_block_rvs) {  
+                                               intrin_name, Array<BlockRV>* reindex_block_rvs) {
   Optional<tir::LayoutInfo> opt_layout_info =
       GetTensorizeLayoutInfo(sch->state(), sch->GetSRef(block_rv),
                              tir::TensorIntrin::Get("dot_8x12x16_i8i8i32_fake_microkernel")->desc);
   ICHECK(opt_layout_info.defined());
   if (!opt_layout_info) return NullOpt;
   const tir::LayoutInfoNode* info = opt_layout_info.value().get();
-  
+
   tir::StmtSRef block_sref = sch->GetSRef(block_rv);
   const tir::BlockNode* block = TVM_SREF_TO_BLOCK(block, block_sref);
-  // for (int i = block->iter_vars.size() - 3; i < block->iter_vars.size(); i++){ 
+  // for (int i = block->iter_vars.size() - 3; i < block->iter_vars.size(); i++){
   //   if (is_one(block->iter_vars[i]->dom->extent)) {
   //     return NullOpt;
   //   }
@@ -148,7 +148,7 @@ Optional<LoopRV> TransformWithTensorIntrin(const tir::Schedule& sch, const tir::
   reindex_block_rvs->push_back(reindex_B);
   block_sref = sch->GetSRef(block_rv);
   block = TVM_SREF_TO_BLOCK(block, block_sref);
-  
+
   // Transform the layout of reindex buffers accordingly
   std::unordered_set<tir::Var, ObjectPtrHash, ObjectPtrEqual> unmapped_vars;
   std::unordered_map<tir::Var, tir::Var, ObjectPtrHash, ObjectPtrEqual> representer_map;
@@ -199,10 +199,7 @@ Optional<LoopRV> TransformWithTensorIntrin(const tir::Schedule& sch, const tir::
   sch->TransformBlockLayout(reindex_A, info->mapping);
   sch->TransformBlockLayout(reindex_B, info->mapping);
   sch->TransformBlockLayout(block_rv, info->mapping);
-  LOG(INFO)<<tir::AsTVMScript(sch->mod());
 
-  LOG(INFO)<<info->mapping;
-  
   Array<LoopRV> loops = sch->GetLoops(block_rv);
   return loops[loops.size() - info->rhs_iters.size()];
 }
