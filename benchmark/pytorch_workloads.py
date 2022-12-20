@@ -9,7 +9,7 @@ import json
 
 def load_config():
     cur_path = os.path.dirname(__file__)
-    config_path = os.path.join(cur_path, "configs.json")
+    config_path = os.path.join(cur_path, "configs")
     with open(config_path) as f:
         return json.load(f)
 
